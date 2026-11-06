@@ -1,0 +1,12 @@
+{
+  "name": "vtt-sonho-jovem",
+  "private": true,
+  "packageManager": "pnpm@12.18.0",
+  "engines": {
+    "node": ">=26.13.0 <27"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @vtt/web --filter @vtt/api run dev",
+    "build": "pnpm -r run build"
+  }
+}

@@ -1,0 +1,7 @@
+packages:
+  - apps/*
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+overrides:
+  '@nestjs/cli>webpack': 5.112.2

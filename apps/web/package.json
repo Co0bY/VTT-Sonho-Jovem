@@ -1,0 +1,23 @@
+{
+  "name": "@vtt/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "quasar dev",
+    "build": "quasar build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "node --test test/geometry.test.mjs"
+  },
+  "dependencies": {
+    "pixi.js": "^8.22.0",
+    "quasar": "^2.0.0",
+    "vue": "^3.0.0",
+    "vue-router": "^4.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@quasar/app-vite": "^2.0.0",
+    "typescript": "~5.9.3",
+    "vue-tsc": "^3.3.14"
+  }
+}

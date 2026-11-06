@@ -1,0 +1,3 @@
+# Uploads locais não fazem parte do código-fonte.
+*
+!.gitignore
