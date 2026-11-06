@@ -1,0 +1,9 @@
+export type Layer = 'fundo' | 'mestre' | 'geral'
+export type Rect = {x:number;y:number;width:number;height:number}
+export type SceneObject = Rect & {id:string;name:string;layer:Layer;image_url:string}
+export type Token = { layer: Layer; id: string; owner_id: string; name: string; color: string; x: number; y: number }
+export type Scene = { id: string; name: string; distance_per_cell: number; distance_unit: string; background_url: string | null; background_transform: Rect | null; cell_size: number; grid_visible: boolean; snap: boolean; width: number; height: number }
+export type Member = { id: string; name: string; role: string }
+export type Message = { id: string; content: string; author: string; user_id: string; created_at: string; roll: null | { expression: string; rolls: number[]; modifier: number; total: number } }
+export type Tabletop = { campaign: { id: string; name: string; system: string; description: string }; user: { id: string; name: string }; role: string; scene: Scene; scenes: Scene[]; tokens: Token[]; objects: SceneObject[]; messages: Message[]; members: Member[] }
+export type Tool = 'select' | 'pan' | 'measure'
