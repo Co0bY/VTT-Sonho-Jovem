@@ -1,0 +1,51 @@
+# Contexto para continuar o VTT
+
+O VTT Sonho Jovem é uma mesa virtual com uma única base de código para hospedagem centralizada e self-hosted. O repositório é Co0bY/VTT-Sonho-Jovem e o clone fica em ~/projetos/vtt-platform no Ubuntu.
+
+## Estado atual
+
+O monorepo pnpm reúne Vue 3 com Quasar e NestJS. O PostgreSQL roda via Docker Compose. A tela inicial e a rota /health foram validadas no navegador e consultam o banco. Consulte os guias anteriores para reproduzir o ambiente. A autoria local do Git foi configurada e o estado acumulado foi organizado em commits Conventional Commits; consulte `13-organizacao-dos-commits.md`.
+
+## Próxima entrega
+
+Construir a primeira mesa PixiJS com grid ajustável, câmera, zoom e tokens arrastáveis. Manter a lógica da mesa separada da interface. Persistência, sincronização multiplayer, paredes, linha de visão e iluminação dinâmica entram em etapas posteriores. As paredes devem poder bloquear movimento e visão de forma independente.
+
+## Codex no Ubuntu e no VS Code
+
+Abra o repositório no VS Code conectado ao WSL ou inicie o Codex CLI no diretório do projeto. O AGENTS.md orienta o Codex a ler este resumo e seguir o modo mentoria. O contexto do repositório pode acompanhar o código entre clientes.
+
+O pacote npm sem escopo chamado codex é um pacote antigo. Use o instalador oficial do Codex CLI no Linux como usuário normal. Valide com codex --version e abra o CLI com codex.
+
+[Documentação oficial do CLI](https://learn.chatgpt.com/docs/codex/cli)
+
+## Atualização — login e dashboard (05/11/2026)
+
+O usuário autorizou iniciar a implementação após fornecer `VTT_INSTRUCOES_CODEX.md`. Foram adicionados cadastro/login/logout, sessões em cookie, dashboard, criação de campanhas e convites compartilháveis com aceite autenticado. Os dados são persistidos no PostgreSQL. A mesa PixiJS continua pendente. Consulte `05-login-mesas-e-convites.md` para decisões, execução, validações e limitações.
+
+## Atualização — primeiro acesso por e-mail
+
+Cadastro agora solicita somente nome/e-mail e envia link de uso único válido por 48 horas para definir a primeira senha. Não há login automático no cadastro. MailHog adicionado ao Compose para capturar e-mails localmente (interface em http://127.0.0.1:8025). Consulte `06-primeiro-acesso-e-mailhog.md`; esse fluxo substitui o cadastro com senha descrito na entrega anterior.
+
+## Atualização — recuperação de senha
+
+Contas já ativadas podem solicitar um e-mail próprio por **Esqueci minha senha**. O link de redefinição vale por 1 hora, é de uso único e separado do primeiro acesso. Confirmar a nova senha encerra as sessões anteriores. Os e-mails compartilham layout com logo incorporada e estrutura MIME compatível com MailHog. Consulte `07-email-primeiro-acesso-visual.md` e `08-redefinicao-de-senha.md` para decisões e validações.
+
+## Atualização — protótipo da mesa virtual
+
+A dashboard agora abre `/mesas/:id` pelo botão **Entrar na mesa**. O protótipo PixiJS tem grid, câmera/zoom, seleção, tokens com controlador, régua, chat e dados calculados no servidor. Grid, tokens e mensagens persistem no PostgreSQL e são atualizados entre participantes por polling de dois segundos. Autorização por campanha e controle de tokens são validados na API. Consulte `09-prototipo-mesa-virtual.md` para arquitetura, execução, testes e recursos ainda pendentes.
+
+## Atualização — cenários e storage
+
+O menu **Cenários** permite criar e editar vários cenários por campanha, definir escala/unidade por quadrado, enviar imagem de fundo e escolher qual cenário exibir ao grupo. Tokens agora são separados por cenário; o cenário do protótipo foi preservado na migração. Imagens de até 10 MB ficam em `storage/<UUID do proprietário>/<UUID da mesa>/cenarios/`; categorias `tokens/` e `outros/` são preparadas no primeiro upload. O conteúdo de storage é ignorado pelo Git e lido por rotas autenticadas. Consulte `10-cenarios-e-storage.md` para decisões, testes e uso.
+
+## Atualização — correção de cenários e camadas
+
+A duplicação de Cenário principal foi corrigida com nomes únicos por campanha, inicialização/reutilização correta e limpeza conservadora das cópias vazias. Cada mesa tem no mínimo uma cena. Criar/editar cenários agora usa pop-ups. Camadas Fundo, Mestre e Geral separam mapa/composição, conteúdo privado e interação dos jogadores; a API filtra conteúdo privado. Imagens adicionais são persistidas por cenário e podem ser movidas e redimensionadas por duplo clique. Consulte `11-cenarios-popups-e-camadas.md`.
+
+## Atualização — dimensões do cenário
+
+Criação e edição permitem definir largura/altura em pixels ou colunas/linhas do grid. Na camada Fundo, o pop-up de redimensionamento também edita o cenário e oferece ajuste ao tamanho da imagem. Dimensões são persistidas por cenário (128 a 16384 pixels por lado); tokens, objetos, câmera e grid usam esses limites. Reduções que deixariam conteúdo fora da área são recusadas sem perda de dados. Consulte `12-dimensoes-do-cenario.md`.
+
+## Organização inicial do histórico Git
+
+O usuário solicitou versionar o estado acumulado em commits descritivos no padrão Conventional Commits. A organização por infraestrutura, API, interface, testes e documentação está registrada em `13-organizacao-dos-commits.md`. Os arquivos locais de análise, uploads e segredos permanecem ignorados.
