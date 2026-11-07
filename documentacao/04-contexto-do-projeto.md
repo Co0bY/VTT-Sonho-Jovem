@@ -49,3 +49,35 @@ Criação e edição permitem definir largura/altura em pixels ou colunas/linhas
 ## Organização inicial do histórico Git
 
 O usuário solicitou versionar o estado acumulado em commits descritivos no padrão Conventional Commits. A organização por infraestrutura, API, interface, testes e documentação está registrada em `13-organizacao-dos-commits.md`. Os arquivos locais de análise, uploads e segredos permanecem ignorados.
+
+## Atualização — alças de tamanho e rotação
+
+Imagens de objetos e fundo do mapa passam a ter alças nos cantos para redimensionar e uma alça circular para girar. Duplo clique abre o pop-up de medidas, agora com rotação em graus. Transformações são persistidas e respeitam as permissões de mestre/camada. Consulte `15-alcas-de-imagens.md` para uso, decisões e validações.
+
+## Atualização — proporção, grid e exclusão
+
+O arraste dos cantos de objetos e fundo agora preserva proporção em passos do grid. Alt libera o tamanho em pixels; o modal mantém a opção de medidas independentes e ganhou exclusão de objeto. Delete no tabuleiro exclui o token ou objeto selecionado, respeitando mestre/camada ativa. Consulte `16-proporcao-grid-e-exclusao.md` para regras e validações; esta entrega substitui o arraste livre por padrão descrito na entrega anterior.
+
+## Atualização — cor e opacidade do grid
+
+A edição de cenários permite selecionar a cor das linhas do grid e ajustar sua opacidade de 0 a 100% por campo numérico ou barra sincronizada. As configurações são persistidas por cenário e usadas no desenho da mesa. Padrões anteriores preservados: `#a29aad` e 16%. Consulte `17-aparencia-do-grid.md` para decisões, uso e validações.
+
+## Atualização — tipos de grid
+
+A edição de cenários oferece Quadrado, Hexagonal e Nenhum. Nenhum bloqueia cor/opacidade sem apagar seus valores e desativa o encaixe; Hexagonal desenha hexágonos e encaixa tokens em seus centros na interface e na API. Cenários anteriores preservam sua visibilidade. Consulte `18-tipos-de-grid.md` para regras, compatibilidade e validações.
+
+## Atualização — troca direta do formato do grid
+
+A mudança de tipo de grid agora reconstrói explicitamente a renderização, preservando câmera e imagens carregadas, e limpa as relações de máscaras antes de destruir os gráficos anteriores. O teste de navegador cobre trocas diretas entre Quadrado e Hexagonal, com e sem imagem de fundo e após recarregar em Hexagonal. Consulte `19-troca-direta-do-grid.md` para investigação e validação.
+
+## Atualização — pastas de cenários
+
+O painel Cenários permite criar, renomear, recolher e excluir pastas por campanha. Cada cenário pode ser movido pelo cartão ou associado a uma pasta na criação/edição. Excluir uma pasta mantém seus cenários em Sem pasta. A organização é restrita ao mestre e persistida no PostgreSQL. Consulte `20-pastas-de-cenarios.md` para uso, decisões e validações.
+
+## Tutorial de instalação com prefixo INFO
+
+O guia completo de WSL, Ubuntu, Docker Desktop, Node/pnpm, configuração e retomada está em `INFO-instalacao-projeto.md` e `INFO-instalacao-projeto.pdf`, sem numeração sequencial. O link compartilhado fornecido pelo usuário não disponibilizou o texto da conversa; o guia registra essa limitação e foi consolidado a partir do checkout e de fontes oficiais. PDF gerado em oito páginas A4, com texto pesquisável e links. Versões locais, estado dos contêineres e endpoints de saúde foram conferidos; a instalação limpa de Windows/WSL não foi refeita.
+
+## Versionamento das atualizações
+
+As entregas acumuladas foram organizadas em commits Conventional Commits por API, interface, testes e documentação, com publicação autorizada para `origin/main`. Consulte `21-versionamento-e-publicacao.md` para a sequência, validações utilizadas e forma de conferir o envio.
