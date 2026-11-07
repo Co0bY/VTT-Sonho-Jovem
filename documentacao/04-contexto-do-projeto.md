@@ -102,6 +102,18 @@ Tokens selecionados agora têm alça circular para girar, com ângulo salvo por 
 
 Ao colocar ou mover tokens menores que uma célula, a presença cresce proporcionalmente até o lado maior alcançar a célula; tokens maiores são preservados. Sem grid, não há esse ajuste. As alças de rotação agora usam passos de 15 graus, com Alt para giro livre, e a API aplica essa regra aos tokens. Consulte `26-tamanho-minimo-e-passos-de-rotacao.md` para exemplos e validações.
 
-## Atualização — régua por células
+## Atualização — abas dos personagens
 
-A régua encaixa início e fim nos centros e conta passos conforme a escala do cenário, incluindo diagonais de um passo no grid quadrado. Alt libera ambas as pontas e a distância em linha reta; sem grid, a medição é livre. Consulte `28-regua-centro-do-grid.md` para decisões e validações.
+Criação e edição abrem em Cartão de visita com imagens, nome, controlador, cor e descrição. Anotações contém um editor de texto; Ficha e Configurações da ficha permanecem vazias. Textos simples são persistidos no personagem. Consulte `29-abas-do-personagem.md`.
+
+## Atualização — editor formatado e apresentação de personagens
+
+Descrição e anotações usam editor com formatação básica. Jogadores editam seus personagens sem trocar controlador; os seletores de controlador e camada ficam restritos ao mestre. Um botão de cartão abre a apresentação em leitura, e o mestre pode exibi-la às sessões de jogadores online, sem enviar anotações ou ficha. Consulte `30-editor-e-cartao-de-apresentacao.md`.
+
+## Atualização — editor visual da ficha
+
+A aba Ficha permite enviar um fundo e adicionar inputs posicionáveis, com rótulo, referência única (ex.: Força/for), tipo, largura e valor. Editar ficha alterna entre layout e preenchimento; Salvar personagem persiste tudo. Configurações da ficha continua vazia e as referências serão trabalhadas nessa aba em outra etapa. Consulte `31-editor-visual-da-ficha.md`.
+
+## Atualização — salvamento da ficha em edição
+
+Salvar personagem encerra o modo de edição da ficha e envia fundo, campos e valores, preservando os dados se a requisição falhar. O servidor de desenvolvimento passa a usar `--no-shell` para evitar uma API antiga órfã ocupando a porta após recarga. O ambiente foi reconstruído e um teste contra a aplicação publicada valida o envio `sheet`. Consulte `32-salvar-ficha-e-recarga-da-api.md`.

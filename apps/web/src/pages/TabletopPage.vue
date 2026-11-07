@@ -4,9 +4,11 @@ import { useRoute } from 'vue-router'
 import TabletopBoard from '../components/TabletopBoard.vue'
 import ScenesMenu from '../components/ScenesMenu.vue'
 import CharacterDialog from '../components/CharacterDialog.vue'
+import CharacterCardDialog from '../components/CharacterCardDialog.vue'
+import { editorHtml } from '../tabletop/rich-text'
 import CharactersPanel from '../components/CharactersPanel.vue'
 import ImageTransformDialog from '../components/ImageTransformDialog.vue'
-import type { Tabletop, Tool, Token, Scene, Layer, Rect, Character } from '../tabletop/types'
+import type { Tabletop, Tool, Token, Scene, Layer, Rect, Character, CharacterCard } from '../tabletop/types'
 import type { Point } from '../tabletop/geometry'
 const route = useRoute()
 const id = String(route.params.id)
@@ -15,6 +17,9 @@ const state = ref<Tabletop>(), loading = ref(true), busy = ref(false), error = r
 const tool = ref<Tool>('select'), selected = ref(''), zoom = ref(100), panel = ref('chat'), sidebar = ref(true)
 const board = ref<InstanceType<typeof TabletopBoard>>(), chatList = ref<HTMLElement>()
 const draft = ref('')
+const presentationCard=ref<CharacterCard|null>(null),presentationError=ref('')
+const presentationQueue:CharacterCard[]=[]
+let presentationCursor:string|undefined
 const characterDialog=ref(false),characterTarget=ref<Character|null>(null)
 
 const editingLayer=ref<Layer>('geral'),objectName=ref(''),objectFile=ref<File>(),objectInput=ref<HTMLInputElement>()
@@ -45,6 +50,10 @@ async function refresh() {
   const shouldScroll = !state.value || !element || element.scrollHeight - element.scrollTop - element.clientHeight < 90
   if (state.value?.scene.id && state.value.scene.id !== data.scene.id) {selected.value='';transformTarget.value=null}
   state.value = data
+  const presentations=await api<{cursor:string;events:{id:string;card:CharacterCard}[]}>(`${endpoint}/presentations${presentationCursor===undefined?'':`?after=${presentationCursor}`}`)
+  if(disposed||requested!==revision)return
+  presentationCursor=presentations.cursor
+  if(!master.value){for(const event of presentations.events)presentationQueue.push(event.card);if(!presentationCard.value&&presentationQueue.length)presentationCard.value=presentationQueue.shift()!}
   if(selected.value && selected.value!=='background'&&!data.tokens.some(t=>t.id===selected.value)&&!data.objects.some(object=>`object:${object.id}`===selected.value))selected.value=''
   if(transformTarget.value&&transformTarget.value.id!=='background'&&!data.objects.some(object=>object.id===transformTarget.value!.id))transformTarget.value=null
   if (shouldScroll) { await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) }
@@ -64,6 +73,13 @@ async function moveToken(tokenId: string, point: Point) {
     const token = await api<Token>(`${endpoint}/tokens/${tokenId}/move`, { x: Math.round(point.x), y: Math.round(point.y) })
     if (state.value) state.value.tokens = state.value.tokens.map(t => t.id === tokenId ? {...t,...token} : t)
   })
+}
+function viewCard(character:Character){presentationError.value='';presentationCard.value={id:character.id,name:character.name,color:character.color,appearance_url:character.appearance_url,token_url:character.token_url,description:editorHtml(character.description,character.description_format)}}
+function closeCard(){presentationError.value='';presentationCard.value=presentationQueue.shift()??null}
+async function presentCard(characterId:string){
+  presentationError.value=''
+  const ok=await action(async()=>{await api(`${endpoint}/characters/${characterId}/present`,{})})
+  if(!ok)presentationError.value=error.value
 }
 function openCharacter(character:Character|null=null){error.value='';characterTarget.value=character;characterDialog.value=true}
 async function saveCharacter(characterId:string|null,data:FormData){return action(async()=>{await api(characterId?`${endpoint}/characters/${characterId}/settings`:`${endpoint}/characters`,data)})}
@@ -116,15 +132,16 @@ onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(
           <div v-if="selectedToken" class="selection-info"><span :style="{ background: selectedToken.color }"></span><strong>{{ selectedToken.name }}</strong><small>{{ master || selectedToken.owner_id === state.user.id ? (master ? 'Cantos: tamanho · Alça circular: girar · Alt: livre · Del: remover' : 'Arraste ou use as setas') : 'Controlado por outro participante' }}</small><button @click="selected = ''" aria-label="Desmarcar token">×</button></div>
           <div class="scene-controls"><span>{{ tool === 'measure' ? `Arraste entre centros · Alt: livre · 1 célula = ${state.scene.distance_per_cell} ${state.scene.distance_unit}` : tool === 'pan' ? 'Arraste o cenário para navegar' : master && (selected === 'background' || selected.startsWith('object:')) ? 'Cantos: proporção/grid · Alt: livre · Duplo clique: editar · Del: excluir' : 'Selecione um token · Arraste o fundo para navegar' }}</span><div><button aria-label="Diminuir zoom" @click="board?.zoomBy(0.8)">−</button><output aria-label="Zoom atual">{{ zoom }}%</output><button aria-label="Aumentar zoom" @click="board?.zoomBy(1.25)">+</button><button aria-label="Ajustar cenário à tela" title="Ajustar cenário à tela" @click="board?.center()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 12h10m-5-5v10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div></div>
         </section>
-        <aside v-if="sidebar" class="table-panel"><nav class="panel-tabs" aria-label="Painéis da mesa"><button v-for="tab in tabs" :key="tab.id" :class="{ active: panel === tab.id }" :aria-pressed="panel === tab.id" :aria-label="tab.label" @click="panel = tab.id"><span>{{ tab.icon }}</span>{{ tab.label }}</button></nav>
+        <aside v-if="sidebar" class="table-panel"><nav class="panel-tabs" aria-label="Painéis da mesa"><button v-for="tab in tabs.filter(tab=>master || tab.id!=='layers')" :key="tab.id" :class="{ active: panel === tab.id }" :aria-pressed="panel === tab.id" :aria-label="tab.label" @click="panel = tab.id"><span>{{ tab.icon }}</span>{{ tab.label }}</button></nav>
           <template v-if="panel === 'chat'"><div class="panel-heading"><h2>Chat da mesa</h2><span>HISTÓRICO COMPARTILHADO</span></div><div ref="chatList" class="chat-messages" role="log" aria-label="Mensagens da mesa" aria-live="polite"><div class="chat-welcome"><span>✦</span><strong>A história começa aqui</strong><p>Converse com seu grupo ou deixe os dados decidirem.</p></div><article v-for="message in state.messages" :key="message.id" class="chat-message" :class="{ 'own-message': message.user_id === state.user.id }"><header><strong>{{ message.author }}</strong><time :datetime="message.created_at">{{ new Date(message.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }}</time></header><div v-if="message.roll" class="dice-result"><span>ROLAGEM · {{ message.roll.expression }}</span><div class="dice-values"><b v-for="(value, index) in message.roll.rolls" :key="index">{{ value }}</b><span v-if="message.roll.modifier">{{ message.roll.modifier > 0 ? '+' : '' }}{{ message.roll.modifier }}</span></div><footer><span>RESULTADO</span><strong>{{ message.roll.total }}</strong></footer></div><p v-else>{{ message.content }}</p></article></div><div class="chat-composer"><div class="quick-dice"><button v-for="sides in [4,6,8,10,12,20]" :key="sides" :disabled="busy" @click="send(`/roll 1d${sides}`)">d{{ sides }}</button></div><form @submit.prevent="send()"><label class="sr-only" for="table-message">Mensagem ou comando de dados</label><textarea id="table-message" v-model="draft" rows="3" maxlength="2000" placeholder="Sua mensagem ou /roll 2d6+3" @keydown.enter.exact.prevent="send()"></textarea><div><span>Como <strong>{{ state.user.name }}</strong></span><button class="primary" :disabled="busy || !draft.trim()">Enviar ↗</button></div></form><small>Enter envia · Shift + Enter quebra linha</small></div></template>
-          <CharactersPanel v-else-if="panel === 'characters'" :characters="state.characters" :tokens="state.tokens" :members="state.members" :master="master" :busy="busy" :selected="selected" @create="openCharacter()" @edit="openCharacter" @place="placeCharacter" @select="selectCharacterToken" @remove="removeToken" @layer="setTokenLayer" />
+          <CharactersPanel v-else-if="panel === 'characters'" :characters="state.characters" :tokens="state.tokens" :members="state.members" :master="master" :busy="busy" :selected="selected" @view="viewCard" @create="openCharacter()" @edit="openCharacter" @place="placeCharacter" @select="selectCharacterToken" @remove="removeToken" @layer="setTokenLayer" />
           <section v-else-if="panel === 'members'" class="panel-content"><div class="panel-heading"><h2>Grupo da campanha</h2><span>{{ state.members.length }} PARTICIPANTES</span></div><p class="panel-help">Pessoas com acesso à mesa. Para convidar mais jogadores, use a opção de convite na dashboard.</p><ul class="member-list"><li v-for="member in state.members" :key="member.id"><span>{{ member.name.slice(0, 1).toUpperCase() }}</span><div><strong>{{ member.name }}{{ member.id === state.user.id ? ' (você)' : '' }}</strong><small>{{ member.role === 'mestre' ? 'Mestre da mesa' : 'Jogador' }}</small></div></li></ul></section>
           <ScenesMenu v-else-if="panel === 'settings'" :error="error" :remove="removeScene" :scenes="state.scenes" :folders="state.folders" :save-folder="saveFolder" :remove-folder="removeFolder" :move-folder="moveSceneFolder" :active-id="state.scene.id" :master="master" :busy="busy" :create="createScene" :save="saveScene" :activate="activateScene" :upload="uploadBackground" />          <section v-else class="panel-content"><div class="panel-heading"><h2>Camadas do cenário</h2><span>{{ master ? editingLayer.toUpperCase() : 'GERAL' }}</span></div><p class="panel-help">Fundo: mapa e composição. Mestre: conteúdo oculto dos jogadores. Geral: tokens e objetos visíveis ao grupo.</p><template v-if="master"><p class="panel-help">Escolha a camada acima do tabuleiro. Selecione uma imagem e arraste os cantos para redimensionar ou a alça circular para girar. Os cantos mantêm a proporção em passos do grid; Alt permite tamanho livre. Duplo clique abre as medidas e a exclusão. Del exclui a seleção.</p><form @submit.prevent="addImage"><label>Nome do objeto<input v-model="objectName" required maxlength="100" placeholder="Ex.: árvore, ponte, pista secreta"></label><label>Imagem do objeto<input ref="objectInput" type="file" accept="image/png,image/jpeg,image/webp" required @change="objectFile = ($event.target as HTMLInputElement).files?.[0]"></label><p class="panel-help">Até 10 MB. Será adicionado à camada {{ editingLayer }}.</p><button class="primary full" :disabled="busy || !objectFile">Adicionar imagem à camada</button></form></template><ul class="layer-object-list"><li v-for="object in state.objects.filter(object => !master || object.layer === editingLayer)" :key="object.id"><img :src="object.image_url" alt=""><div><strong>{{ object.name }}</strong><small>{{ object.layer }}</small></div><button v-if="master" class="text-button" @click="editImage(object.id, object)">Redimensionar</button></li></ul></section>
 
         </aside>
       </div><footer class="table-status"><span><i></i>{{ busy ? 'Salvando…' : error || networkError ? 'Falha de atualização' : 'Alterações salvas no servidor' }}</span><span>Protótipo · atualização a cada 2 s <b>✦ SONHO JOVEM</b></span></footer>
-    <CharacterDialog :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" @close="characterDialog=false" />
+    <CharacterCardDialog :card="presentationCard" :master="master" :busy="busy" :error="presentationError" @close="closeCard" @present="presentCard" />
+    <CharacterDialog :master="master" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" @close="characterDialog=false" />
     <ImageTransformDialog :scene="state.scene" :target="transformTarget" :busy="busy" :error="error" :save="transformImage" :remove="removeObject" @close="transformTarget = null" /></template>
   </div>
 </template>

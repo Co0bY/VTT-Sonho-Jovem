@@ -261,6 +261,27 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
           created_at timestamptz NOT NULL DEFAULT now(),
           UNIQUE(id,campaign_id)
         );
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '' CHECK(length(description)<=20000);
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS notes text NOT NULL DEFAULT '' CHECK(length(notes)<=20000);
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS sheet jsonb NOT NULL DEFAULT '{"version":1,"width":800,"height":1100,"fields":[]}'::jsonb CHECK(jsonb_typeof(sheet)='object');
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS sheet_background_file text;
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS description_format text NOT NULL DEFAULT 'plain' CHECK(description_format IN ('plain','html'));
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS notes_format text NOT NULL DEFAULT 'plain' CHECK(notes_format IN ('plain','html'));
+        CREATE TABLE IF NOT EXISTS tabletop_presence (
+          campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          seen_at timestamptz NOT NULL DEFAULT now(),
+          PRIMARY KEY(campaign_id,user_id)
+        );
+        CREATE TABLE IF NOT EXISTS tabletop_presentations (
+          id bigserial PRIMARY KEY,
+          campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          character_id uuid NOT NULL REFERENCES tabletop_characters(id) ON DELETE CASCADE,
+          recipients uuid[] NOT NULL,
+          card jsonb NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS tabletop_presentations_campaign_idx ON tabletop_presentations(campaign_id,id);
         CREATE INDEX IF NOT EXISTS tabletop_characters_campaign_idx ON tabletop_characters(campaign_id);
         ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS character_id uuid;
         INSERT INTO tabletop_characters(id,campaign_id,owner_id,name,color,created_at)
