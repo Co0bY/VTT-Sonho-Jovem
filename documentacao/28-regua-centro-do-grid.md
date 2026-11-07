@@ -20,3 +20,9 @@ A lógica está em `measureRuler`, separada do componente PixiJS. A distância l
 Entrega preparada em `feat/regua-centro-do-grid`, na worktree `/tmp/vtt-regua`, a partir de `origin/main` atualizada. Ajuste também aplicado ao checkout em execução, preservando alterações locais anteriores.
 
 Após autenticação do GitHub CLI pelo navegador com a conta Co0bY, a branch foi publicada em `origin`. PR em rascunho para `main`: https://github.com/Co0bY/VTT-Sonho-Jovem/pull/2. Nenhum merge realizado.
+
+## Encerramento ao soltar
+
+A régua é exibida somente enquanto o ponteiro está pressionado. Soltar o botão ou cancelar o gesto limpa linha, pontas e distância no mesmo redesenho. A captura do ponteiro mantém o encerramento ao soltar fora do tabuleiro. A ferramenta permanece selecionada para iniciar outra medição.
+
+Validação: checagem de tipos e `git diff --check` aprovados. Para conferir no navegador, arrastar a régua e soltar dentro e fora do tabuleiro, com e sem Alt; a marcação deve desaparecer. Interação no navegador ainda não automatizada.

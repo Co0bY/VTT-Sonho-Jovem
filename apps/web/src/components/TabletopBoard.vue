@@ -257,7 +257,7 @@ function updateManipulation(free:boolean){
 function up(event: PointerEvent) {
   if(manipulation){if(manipulation.pointer!==event.pointerId)return;const m=manipulation;manipulation=undefined;if(host.value?.hasPointerCapture(event.pointerId))host.value.releasePointerCapture(event.pointerId);if(event.type!=='pointercancel'){if(m.id.startsWith('token:')){if(m.handle===4)emit('rotate',m.id.slice(6),m.preview.rotation??0,m.free);else emit('resize',m.id.slice(6),m.preview)}else emit('transform',m.id,m.preview)};paint();return}
   if (!drag || drag.pointer !== event.pointerId) return
-  if(drag.mode==='measure'&&event.type!=='pointercancel')updateRuler(drag.start,toWorld(point(event),camera),event.altKey)
+  if(drag.mode==='measure')ruler=undefined
   const finished = drag; drag = undefined
   if (host.value?.hasPointerCapture(event.pointerId)) host.value.releasePointerCapture(event.pointerId)
   if (event.type !== 'pointercancel' && finished.mode === 'token' && finished.position && (finished.position.x!==finished.token!.x || finished.position.y!==finished.token!.y || (finished.moved&&finished.size&&(finished.size.width!==finished.token!.width||finished.size.height!==finished.token!.height)))) emit('move', finished.token!.id, finished.position)
