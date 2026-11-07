@@ -74,7 +74,7 @@ async function placeCharacter(characterId:string,point?:Point){
   await action(async()=>{const token=await api<Token>(`${endpoint}/characters/${characterId}/place`,{x:Math.round(position.x),y:Math.round(position.y),layer:editingLayer.value});selected.value=token.id;tool.value='select'})
 }
 function selectCharacterToken(tokenId:string){const token=state.value?.tokens.find(token=>token.id===tokenId);if(token){editingLayer.value=token.layer;selected.value=token.id;tool.value='select';board.value?.focus()}}
-async function rotateToken(tokenId:string,rotation:number){await action(async()=>{await api(`${endpoint}/tokens/${tokenId}/rotate`,{rotation})})}
+async function rotateToken(tokenId:string,rotation:number,free:boolean){await action(async()=>{await api(`${endpoint}/tokens/${tokenId}/rotate`,{rotation,free})})}
 async function resizeToken(tokenId:string,rect:Rect){await action(async()=>{await api(`${endpoint}/tokens/${tokenId}/resize`,rect)})}
 async function removeToken(tokenId: string) { await action(async () => { await api(`${endpoint}/tokens/${tokenId}/remove`, {}); selected.value = '' }) }
 async function removeObject(objectId:string){return action(async()=>{await api(`${endpoint}/objects/${objectId}/remove`,{});selected.value=''})}

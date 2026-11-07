@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { Database } from './database'
 import { Storage } from './storage'
 import { layer } from './layers'
+import { imageSize } from 'image-size'
+import { minimumTokenSize } from './grid'
 import { position } from './tabletop-rules'
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -71,6 +73,18 @@ export class Characters {
     try{await this.storage.remove(access.campaign.owner_id,access.campaign.id,file.category,file.name)}catch{console.warn('Não foi possível limpar uma imagem de personagem.')}
   }
 
+  async mapSize(access:CharacterContext,token:{width:number|null;height:number|null;token_file:string|null}){
+    if(access.scene.grid_type==='none')return {width:token.width,height:token.height}
+    let width=token.width??access.scene.cell_size*0.8,height=token.height??access.scene.cell_size*0.8
+    if(token.width===null&&token.token_file){
+      try{
+        const file=await this.storage.read(access.campaign.owner_id,access.campaign.id,'tokens',token.token_file)
+        try{const size=imageSize(await file.readFile());const scale=access.scene.cell_size*0.8/Math.max(size.width!,size.height!);width=size.width!*scale;height=size.height!*scale}finally{await file.close()}
+      }catch{/* A missing image uses the same square fallback as the canvas. */}
+    }
+    return minimumTokenSize({width,height},access.scene.cell_size,access.scene.grid_type)
+  }
+
   async place(access:CharacterContext,id:string,body:Record<string,unknown>){
     if(!access.master)throw new ForbiddenException('Somente o mestre pode adicionar personagens ao mapa.')
     const character=await this.find(access.campaign.id,id)
@@ -81,7 +95,8 @@ export class Characters {
       await client.query('BEGIN')
       const current=(await client.query('SELECT * FROM tabletop_characters WHERE id=$1 AND campaign_id=$2 FOR SHARE',[character.id,access.campaign.id])).rows[0]
       if(!current)throw new NotFoundException('Personagem não encontrado.')
-      const token=(await client.query('INSERT INTO tabletop_tokens(id,campaign_id,scene_id,character_id,owner_id,name,color,x,y,layer) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',[randomUUID(),access.campaign.id,access.scene.id,current.id,current.owner_id,current.name,current.color,coords.x,coords.y,targetLayer])).rows[0]
+      const size=await this.mapSize(access,{width:null,height:null,token_file:current.token_file})
+      const token=(await client.query('INSERT INTO tabletop_tokens(id,campaign_id,scene_id,character_id,owner_id,name,color,x,y,layer,width,height) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',[randomUUID(),access.campaign.id,access.scene.id,current.id,current.owner_id,current.name,current.color,coords.x,coords.y,targetLayer,size.width,size.height])).rows[0]
       await client.query('COMMIT');return token
     }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
 

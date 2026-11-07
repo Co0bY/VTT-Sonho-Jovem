@@ -395,13 +395,16 @@ class ApiController {
     if (!members.rowCount) throw new BadRequestException('O controlador precisa participar da mesa.')
     const targetLayer = layer(body.layer || 'geral')
     const coords = position(body.x, body.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type)
-    return (await this.db.pool.query('INSERT INTO tabletop_tokens(id,campaign_id,owner_id,name,color,x,y,scene_id,layer) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *', [randomUUID(), id, owner, name, color, coords.x, coords.y, access.scene.id, targetLayer])).rows[0]
+    const size=access.scene.grid_type==='none'?null:access.scene.cell_size
+    return (await this.db.pool.query('INSERT INTO tabletop_tokens(id,campaign_id,owner_id,name,color,x,y,scene_id,layer,width,height) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) RETURNING *', [randomUUID(), id, owner, name, color, coords.x, coords.y, access.scene.id, targetLayer,size])).rows[0]
   }
   @Post('campaigns/:id/tabletop/tokens/:tokenId/rotate') async rotateToken(@Param('id') id:string,@Param('tokenId') tokenId:string,@Body() body:Record<string,unknown>,@Req() req:Request){
     this.accounts.mutation(req);const access=await this.tableAccess(id,req)
     if(!access.master)throw new ForbiddenException('Somente o mestre pode girar tokens.')
     if(!uuid.test(tokenId))throw new BadRequestException('Token inválido.')
-    const rotation=normalizeRotation(body.rotation)
+    if(body.free!==undefined&&typeof body.free!=='boolean')throw new BadRequestException('Modo de rotação inválido.')
+    const angle=normalizeRotation(body.rotation)
+    const rotation=body.free===true?angle:normalizeRotation(Math.round(angle/15)*15)
     const result=await this.db.pool.query('UPDATE tabletop_tokens SET rotation=$1 WHERE id=$2 AND campaign_id=$3 AND scene_id=$4 RETURNING *',[rotation,tokenId,id,access.scene.id])
     if(!result.rowCount)throw new NotFoundException('Token não encontrado neste cenário.')
     return result.rows[0]
@@ -421,10 +424,11 @@ class ApiController {
     this.accounts.mutation(req)
     const access = await this.tableAccess(id, req)
     if (!uuid.test(tokenId)) throw new BadRequestException('Token inválido.')
-    const current=await this.db.pool.query("SELECT width,height FROM tabletop_tokens WHERE id=$1 AND campaign_id=$2 AND scene_id=$3 AND ($4::boolean OR (owner_id=$5 AND layer='geral'))",[tokenId,id,access.scene.id,access.master,access.user.id])
+    const current=await this.db.pool.query("SELECT t.width,t.height,c.token_file FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.id=$1 AND t.campaign_id=$2 AND t.scene_id=$3 AND ($4::boolean OR (t.owner_id=$5 AND t.layer='geral'))",[tokenId,id,access.scene.id,access.master,access.user.id])
     if(!current.rowCount)throw new ForbiddenException('Você não pode mover este token.')
-    const coords = position(body?.x, body?.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type,current.rows[0])
-    const result = await this.db.pool.query(`UPDATE tabletop_tokens SET x=$1,y=$2 WHERE id=$3 AND campaign_id=$4 AND ($5::boolean OR (owner_id=$6 AND layer='geral')) AND scene_id=$7 RETURNING *`, [coords.x, coords.y, tokenId, id, access.master, access.user.id, access.scene.id])
+    const size=await this.characters.mapSize(access,current.rows[0])
+    const coords = position(body?.x, body?.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type,size)
+    const result = await this.db.pool.query(`UPDATE tabletop_tokens SET x=$1,y=$2,width=$8,height=$9 WHERE id=$3 AND campaign_id=$4 AND ($5::boolean OR (owner_id=$6 AND layer='geral')) AND scene_id=$7 RETURNING *`, [coords.x, coords.y, tokenId, id, access.master, access.user.id, access.scene.id,size.width,size.height])
     if (!result.rowCount) throw new ForbiddenException('Você não pode mover este token.')
     return result.rows[0]
   }

@@ -86,3 +86,13 @@ export function tokenBounds(token:Point & {width:number|null;height:number|null;
   const width=token.width??(texture?texture.width*scale:cell*0.8),height=token.height??(texture?texture.height*scale:cell*0.8)
   return {x:token.x-width/2,y:token.y-height/2,width,height,rotation:token.rotation??0}
 }
+
+export function minimumTokenSize(size:{width:number;height:number},cell:number,gridType='square'){
+  const scale=gridType==='none'?1:Math.max(1,cell/Math.max(size.width,size.height))
+  return {width:size.width*scale,height:size.height*scale}
+}
+
+export function rotationAngle(angle:number,free=false){
+  const rotation=free?angle:Math.round(angle/15)*15
+  return ((rotation%360)+360)%360
+}

@@ -37,15 +37,15 @@ async function contextFor(token) {
   context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)))
   return context
 }
-async function screenshotHasColor(page,buffer,color){
-  return page.evaluate(async({bytes,color})=>{
+async function screenshotHasColor(page,buffer,color,tolerance=0){
+  return page.evaluate(async({bytes,color,tolerance})=>{
     const image=await createImageBitmap(new Blob([new Uint8Array(bytes)],{type:'image/png'}))
     const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height
     const context=canvas.getContext('2d');context.drawImage(image,0,0);image.close()
     const pixels=context.getImageData(0,0,canvas.width,canvas.height).data
-    for(let i=0;i<pixels.length;i+=4)if(pixels[i]===color[0]&&pixels[i+1]===color[1]&&pixels[i+2]===color[2])return true
+    for(let i=0;i<pixels.length;i+=4)if(Math.abs(pixels[i]-color[0])<=tolerance&&Math.abs(pixels[i+1]-color[1])<=tolerance&&Math.abs(pixels[i+2]-color[2])<=tolerance)return true
     return false
-  },{bytes:[...buffer],color})
+  },{bytes:[...buffer],color,tolerance})
 }
 async function main() {
   storageRoot = await mkdtemp('/tmp/vtt-browser-storage-')
@@ -83,7 +83,7 @@ async function main() {
   const emptyBoard=await page.locator('.pixi-board').boundingBox()
   const testScale=Math.max(0.02,Math.min(1,Math.min((emptyBoard.width-140)/3200,(emptyBoard.height-140)/2200)))
   const testOrigin={x:emptyBoard.x+(emptyBoard.width-3200*testScale)/2,y:emptyBoard.y+(emptyBoard.height-2200*testScale)/2}
-  const transparentPoint={x:Math.round(testOrigin.x+(1632+64*0.8*0.35)*testScale),y:Math.round(testOrigin.y+1120*testScale)}
+  const transparentPoint={x:Math.round(testOrigin.x+(1632+64*0.35)*testScale),y:Math.round(testOrigin.y+1120*testScale)}
   const backgroundPixel=await page.screenshot({clip:{...transparentPoint,width:1,height:1},animations:'disabled'})
   const tokenLoaded=page.waitForResponse(r=>r.url().includes(guardian.token_url)&&r.status()===200)
   await page.getByRole('button',{name:'Adicionar Guardião ao mapa',exact:true}).click()
@@ -92,8 +92,8 @@ async function main() {
   await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
   const transparentPixel=await page.screenshot({clip:{...transparentPoint,width:1,height:1},animations:'disabled'})
   assert.ok(transparentPixel.equals(backgroundPixel),'Transparent PNG area must reveal the map rather than an identification-colored background')
-  const labelShot=await page.screenshot({clip:{x:Math.round(testOrigin.x+1632*testScale)-55,y:Math.round(testOrigin.y+(1120+25.6)*testScale)+8,width:110,height:25},animations:'disabled'})
-  const usesIdentificationColor=await screenshotHasColor(page,labelShot,[164,122,226])
+  const labelShot=await page.screenshot({clip:{x:Math.round(testOrigin.x+1632*testScale)-55,y:Math.round(testOrigin.y+(1120+32)*testScale)+8,width:110,height:25},animations:'disabled'})
+  const usesIdentificationColor=await screenshotHasColor(page,labelShot,[164,122,226],16)
   assert.equal(usesIdentificationColor,true,'The token label must use the character identification color')
   async function resizeMapToken(width,height,free=false){
     await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
@@ -105,12 +105,14 @@ async function main() {
     await until(async()=>Math.abs((await snapshot()).tokens[0].width-width)<0.001)
     await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
   }
-  async function rotateMapToken(degrees){
+  async function rotateMapToken(degrees,free=false,expected=degrees){
     await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
     const token=(await snapshot()).tokens[0],angle=(token.rotation??0)*Math.PI/180,dist=(token.height??51.2)/2+30/testScale,target=degrees*Math.PI/180
+    if(free)await page.keyboard.down('Alt')
     await page.mouse.move(testOrigin.x+(token.x+Math.sin(angle)*dist)*testScale,testOrigin.y+(token.y-Math.cos(angle)*dist)*testScale)
     await page.mouse.down();await page.mouse.move(testOrigin.x+(token.x+Math.sin(target)*dist)*testScale,testOrigin.y+(token.y-Math.cos(target)*dist)*testScale,{steps:8});await page.mouse.up()
-    await until(async()=>Math.abs((((await snapshot()).tokens[0].rotation-degrees+540)%360)-180)<0.01)
+    if(free)await page.keyboard.up('Alt')
+    await until(async()=>Math.abs((((await snapshot()).tokens[0].rotation-expected+540)%360)-180)<0.01)
     await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
   }
   await resizeMapToken(128,128)
@@ -118,6 +120,10 @@ async function main() {
   await resizeMapToken(150,90,true)
   assert.ok(Math.abs((await snapshot()).tokens[0].height-90)<0.001)
   const beforeRotation=(await snapshot()).tokens[0]
+  await rotateMapToken(23,false,30)
+  assert.equal((await snapshot()).tokens[0].rotation,30)
+  await rotateMapToken(23,true)
+  assert.ok(Math.abs((await snapshot()).tokens[0].rotation-23)<0.01)
   await rotateMapToken(90)
   assert.equal((await snapshot()).tokens[0].x,beforeRotation.x)
   assert.equal((await snapshot()).tokens[0].width,beforeRotation.width)
@@ -129,6 +135,12 @@ async function main() {
   await page.mouse.click(testOrigin.x+freeToken.x*testScale,testOrigin.y+freeToken.y*testScale)
   await rotateMapToken(0)
   await resizeMapToken(51.2,51.2,true)
+  const small=(await snapshot()).tokens[0]
+  await page.mouse.move(testOrigin.x+small.x*testScale,testOrigin.y+small.y*testScale)
+  await page.mouse.down();await page.mouse.move(testOrigin.x+small.x*testScale+4,testOrigin.y+small.y*testScale,{steps:4});await page.mouse.up()
+  await until(async()=> Math.abs(Math.max((await snapshot()).tokens[0].width,(await snapshot()).tokens[0].height)-64)<0.001)
+  assert.ok(Math.abs((await snapshot()).tokens[0].height-64)<0.001)
+  await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
   const first = (await snapshot()).tokens[0]
   await page.mouse.dblclick(testOrigin.x+first.x*testScale,testOrigin.y+first.y*testScale)
   assert.equal(await page.getByRole('heading',{name:'Redimensionar imagem',exact:true}).count(),0)
@@ -286,6 +298,7 @@ async function main() {
   await persistentCard.dragTo(page.locator('.pixi-board canvas'))
   await until(async()=> (await snapshot()).tokens.length===1)
   assert.equal((await snapshot()).tokens[0].character_id,guardian.id)
+  assert.equal((await snapshot()).tokens[0].width,64)
   assert.equal((await snapshot()).tokens[0].token_url,guardian.token_url)
   await page.getByRole('button',{name:'Editar personagem Guardião',exact:true}).click()
   assert.ok((await page.getByRole('img',{name:'Prévia da aparência',exact:true}).getAttribute('src')).includes('/images/appearance/'))
@@ -410,7 +423,7 @@ async function main() {
   assert.equal(await page.locator('.character-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth),true)
   await page.getByRole('button',{name:'Cancelar',exact:true}).click()
   assert.deepEqual(errors,[])
-  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, alças de tokens com tamanho proporcional/Alt, rotação persistida e marcador colorido com inicial, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
+  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, tokens pequenos ampliados ao grid na colocação e no arraste, giro de 15 graus/Alt livre, alças de tokens com tamanho proporcional/Alt, rotação persistida e marcador colorido com inicial, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
   if(browser)await browser.close()

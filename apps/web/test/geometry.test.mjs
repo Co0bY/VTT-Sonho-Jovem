@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { tokenBounds, hexGridSegments, hexPosition, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance } from '../src/tabletop/geometry.ts'
+import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, hexPosition, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance } from '../src/tabletop/geometry.ts'
 test('zoom preserves world point beneath cursor and clamps zoom', () => {
   const camera = {x:100,y:-50,scale:0.8}, cursor={x:333,y:222}
   const before = toWorld(cursor,camera)
@@ -116,4 +116,16 @@ test('token bounds preserve rotation for handles, hit testing and corner resizin
   const after=imagePoint(next,0,0)
   assert.equal(next.rotation,90)
   assert.ok(Math.hypot(after.x-fixed.x,after.y-fixed.y)<1e-8)
+})
+
+test('small tokens grow proportionally to a cell while large tokens keep their size',()=>{
+  assert.deepEqual(minimumTokenSize({width:20,height:40},64),{width:32,height:64})
+  assert.deepEqual(minimumTokenSize({width:40,height:40},64),{width:64,height:64})
+  assert.deepEqual(minimumTokenSize({width:100,height:50},64),{width:100,height:50})
+  assert.deepEqual(minimumTokenSize({width:20,height:20},64,'none'),{width:20,height:20})
+})
+test('rotation snaps every 15 degrees unless Alt enables free rotation',()=>{
+  for(const [angle,expected] of [[7,0],[8,15],[23,30],[44,45],[359,0],[-17,345],[721,0]])assert.equal(rotationAngle(angle),expected)
+  assert.ok(Math.abs(rotationAngle(23.4,true)-23.4)<1e-8)
+  assert.ok(Math.abs(rotationAngle(-17.2,true)-342.8)<1e-8)
 })

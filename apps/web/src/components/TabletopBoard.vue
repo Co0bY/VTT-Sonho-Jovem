@@ -2,9 +2,9 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { Application, Container, Graphics, Text, Texture, Sprite } from 'pixi.js'
 import type { Scene, Token, Tool, Layer, SceneObject, Rect } from '../tabletop/types'
-import { tokenBounds, hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance, type Camera, type Point } from '../tabletop/geometry'
+import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance, type Camera, type Point } from '../tabletop/geometry'
 const props = defineProps<{ scene: Scene; tokens: Token[]; objects: SceneObject[]; layer: Layer; userId: string; master: boolean; tool: Tool; selected: string; locked: boolean }>()
-const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point]; resize:[id:string,rect:Rect]; rotate:[id:string,rotation:number] }>()
+const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point]; resize:[id:string,rect:Rect]; rotate:[id:string,rotation:number,free:boolean] }>()
 const host = ref<HTMLDivElement>(), failure = ref(''), backgroundError = ref(''), backgroundLoading = ref(false)
 let backgroundTexture: Texture | undefined, backgroundAbort: AbortController | undefined, backgroundVersion = 0
 let app: Application | undefined, world: Container, observer: ResizeObserver | undefined, disposed = false
@@ -13,8 +13,8 @@ let tokenAbort:AbortController|undefined,tokenVersion=0
 const objectTextures = new Map<string,Texture>()
 let objectAbort: AbortController | undefined, objectVersion=0
 let camera: Camera = { x: 0, y: 0, scale: 0.6 }
-let drag: { pointer: number; mode: 'token' | 'pan' | 'measure' | 'object' | 'background'; start: Point; camera: Camera; token?: Token; object?: SceneObject; rect?:Rect; offset?: Point; position?: Point } | undefined
-let manipulation: {pointer:number;id:string;rect:Rect;preview:Rect;handle:number;at:Point;startAngle:number} | undefined
+let drag: { pointer: number; mode: 'token' | 'pan' | 'measure' | 'object' | 'background'; start: Point; camera: Camera; token?: Token; object?: SceneObject; rect?:Rect; offset?: Point; position?: Point; size?:{width:number;height:number}; moved?:boolean } | undefined
+let manipulation: {pointer:number;id:string;rect:Rect;preview:Rect;handle:number;free:boolean;at:Point;startAngle:number} | undefined
 let ruler: { start: Point; end: Point } | undefined
 const canMove = (t: Token) => props.master || (t.layer === 'geral' && t.owner_id === props.userId)
 function clear(container=world) {
@@ -55,7 +55,7 @@ function paint() {
   for (const token of props.tokens.filter(token=>token.layer===layer)) {
     const point = drag?.mode === 'token' && drag.token?.id === token.id && drag.position ? drag.position : token
     const texture=token.token_url?tokenTextures.get(token.token_url):undefined
-    const rect=manipulation?.id===`token:${token.id}`?manipulation.preview:tokenBounds({...token,...point},cell,texture)
+    const rect=manipulation?.id===`token:${token.id}`?manipulation.preview:tokenBounds({...token,...point,...(drag?.mode==='token'&&drag.token?.id===token.id?drag.size:{})},cell,texture)
     const item = new Container(); item.position.set(rect.x+rect.width/2,rect.y+rect.height/2)
     const visual=new Container();visual.angle=rect.rotation??0;item.addChild(visual)
     if(texture){
@@ -198,7 +198,7 @@ function down(event: PointerEvent) {
   const selected=selectedImage()
   if(selected&&!props.locked&&event.button===0){
     const handle=handleAt(selected,at)
-    if(handle>=0){manipulation={pointer:event.pointerId,id:selected.id,rect:{...selected.rect},preview:{...selected.rect},handle,at,startAngle:Math.atan2(at.y-selected.rect.y-selected.rect.height/2,at.x-selected.rect.x-selected.rect.width/2)};return}
+    if(handle>=0){manipulation={pointer:event.pointerId,id:selected.id,rect:{...selected.rect},preview:{...selected.rect},handle,free:event.altKey,at,startAngle:Math.atan2(at.y-selected.rect.y-selected.rect.height/2,at.x-selected.rect.x-selected.rect.width/2)};return}
   }
   if (props.tool === 'measure' && event.button === 0) {
     ruler = { start: at, end: at }; drag = { pointer: event.pointerId, mode: 'measure', start: at, camera: { ...camera } }
@@ -235,22 +235,27 @@ function move(event: PointerEvent) {
   if (drag.mode === 'pan') { camera.x = drag.camera.x + at.x - drag.start.x; camera.y = drag.camera.y + at.y - drag.start.y }
   if (drag.mode === 'measure') ruler = { start: drag.start, end: toWorld(at, camera) }
   if(drag.mode==='object'||drag.mode==='background'){const atWorld=toWorld(at,camera);drag.position={x:Math.max(0,Math.min(props.scene.width-drag.rect!.width,atWorld.x-drag.offset!.x)),y:Math.max(0,Math.min(props.scene.height-drag.rect!.height,atWorld.y-drag.offset!.y))}}
-  if (drag.mode === 'token') { const worldPoint = toWorld(at, camera); drag.position = tokenPosition({ x: worldPoint.x - drag.offset!.x, y: worldPoint.y - drag.offset!.y }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height, props.scene.grid_type,drag.token) }
+  if (drag.mode === 'token') {
+    const worldPoint = toWorld(at, camera),token=drag.token!
+    if(Math.hypot(worldPoint.x-drag.start.x,worldPoint.y-drag.start.y)*camera.scale>=3)drag.moved=true
+    if(drag.moved)drag.size=minimumTokenSize(tokenBounds(token,props.scene.cell_size,token.token_url?tokenTextures.get(token.token_url):undefined),props.scene.cell_size,props.scene.grid_type)
+    drag.position = tokenPosition({ x: worldPoint.x - drag.offset!.x, y: worldPoint.y - drag.offset!.y }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height, props.scene.grid_type,drag.size??token)
+  }
   paint()
 }
 function updateManipulation(free:boolean){
   if(!manipulation)return
-  const m=manipulation,r=m.rect,at=m.at
-  const next=m.handle===4?{...r,rotation:((r.rotation??0)+(Math.atan2(at.y-r.y-r.height/2,at.x-r.x-r.width/2)-m.startAngle)*180/Math.PI+720)%360}:resizeImage(r,at,m.handle,{proportional:!free,cell:props.scene.grid_type==='none'?1:props.scene.cell_size})
+  const m=manipulation,r=m.rect,at=m.at;m.free=free
+  const next=m.handle===4?{...r,rotation:rotationAngle((r.rotation??0)+(Math.atan2(at.y-r.y-r.height/2,at.x-r.x-r.width/2)-m.startAngle)*180/Math.PI,free)}:resizeImage(r,at,m.handle,{proportional:!free,cell:props.scene.grid_type==='none'?1:props.scene.cell_size})
   if(next.x>=-1e-8&&next.y>=-1e-8&&next.x+next.width<=props.scene.width+1e-8&&next.y+next.height<=props.scene.height+1e-8)m.preview={...next,x:Math.max(0,next.x),y:Math.max(0,next.y)}
   paint()
 }
 function up(event: PointerEvent) {
-  if(manipulation){if(manipulation.pointer!==event.pointerId)return;const m=manipulation;manipulation=undefined;if(host.value?.hasPointerCapture(event.pointerId))host.value.releasePointerCapture(event.pointerId);if(event.type!=='pointercancel'){if(m.id.startsWith('token:')){if(m.handle===4)emit('rotate',m.id.slice(6),m.preview.rotation??0);else emit('resize',m.id.slice(6),m.preview)}else emit('transform',m.id,m.preview)};paint();return}
+  if(manipulation){if(manipulation.pointer!==event.pointerId)return;const m=manipulation;manipulation=undefined;if(host.value?.hasPointerCapture(event.pointerId))host.value.releasePointerCapture(event.pointerId);if(event.type!=='pointercancel'){if(m.id.startsWith('token:')){if(m.handle===4)emit('rotate',m.id.slice(6),m.preview.rotation??0,m.free);else emit('resize',m.id.slice(6),m.preview)}else emit('transform',m.id,m.preview)};paint();return}
   if (!drag || drag.pointer !== event.pointerId) return
   const finished = drag; drag = undefined
   if (host.value?.hasPointerCapture(event.pointerId)) host.value.releasePointerCapture(event.pointerId)
-  if (event.type !== 'pointercancel' && finished.mode === 'token' && finished.position && (finished.position.x!==finished.token!.x || finished.position.y!==finished.token!.y)) emit('move', finished.token!.id, finished.position)
+  if (event.type !== 'pointercancel' && finished.mode === 'token' && finished.position && (finished.position.x!==finished.token!.x || finished.position.y!==finished.token!.y || (finished.moved&&finished.size&&(finished.size.width!==finished.token!.width||finished.size.height!==finished.token!.height)))) emit('move', finished.token!.id, finished.position)
   if(event.type!=='pointercancel'&&(finished.mode==='object'||finished.mode==='background')&&finished.rect&&finished.position&&(Math.abs(finished.rect.x-finished.position.x)>0.5||Math.abs(finished.rect.y-finished.position.y)>0.5))emit('transform',finished.object?.id||'background',{...finished.rect,...finished.position})
   paint()
 }
