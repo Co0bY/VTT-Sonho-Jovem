@@ -105,3 +105,7 @@ Ao colocar ou mover tokens menores que uma célula, a presença cresce proporcio
 ## Atualização — abas dos personagens
 
 Criação e edição abrem em Cartão de visita com imagens, nome, controlador, cor e descrição. Anotações contém um editor de texto; Ficha e Configurações da ficha permanecem vazias. Textos simples são persistidos no personagem. Consulte `29-abas-do-personagem.md`.
+
+## Atualização — editor formatado e apresentação de personagens
+
+Descrição e anotações usam editor com formatação básica. Jogadores editam seus personagens sem trocar controlador; os seletores de controlador e camada ficam restritos ao mestre. Um botão de cartão abre a apresentação em leitura, e o mestre pode exibi-la às sessões de jogadores online, sem enviar anotações ou ficha. Consulte `30-editor-e-cartao-de-apresentacao.md`.

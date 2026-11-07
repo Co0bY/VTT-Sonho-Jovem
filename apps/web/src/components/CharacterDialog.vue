@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import CharacterTextEditor from './CharacterTextEditor.vue'
+import { editorHtml } from '../tabletop/rich-text'
 import type { Character, Member } from '../tabletop/types'
-const props=defineProps<{open:boolean;character:Character|null;members:Member[];userId:string;busy:boolean;error:string;save:(id:string|null,data:FormData)=>Promise<boolean>}>()
+const props=defineProps<{open:boolean;master:boolean;character:Character|null;members:Member[];userId:string;busy:boolean;error:string;save:(id:string|null,data:FormData)=>Promise<boolean>}>()
 const emit=defineEmits<{close:[]}>()
 const name=ref(''),owner=ref(''),color=ref('#a47ae2'),localError=ref('')
 const tab=ref('card'),description=ref(''),notes=ref('')
@@ -14,7 +16,7 @@ const removed=reactive<Record<Kind,boolean>>({appearance:false,token:false})
 function release(kind:Kind){if(previews[kind].startsWith('blob:'))URL.revokeObjectURL(previews[kind]);previews[kind]=''}
 watch(()=>[props.open,props.character?.id],()=>{
   if(!props.open){for(const kind of kinds){release(kind);uploads[kind]=null};return}
-  tab.value='card';description.value=props.character?.description??'';notes.value=props.character?.notes??''
+  tab.value='card';description.value=editorHtml(props.character?.description??'',props.character?.description_format);notes.value=editorHtml(props.character?.notes??'',props.character?.notes_format)
   name.value=props.character?.name??'';owner.value=props.character?.owner_id??props.userId;color.value=props.character?.color??'#a47ae2';localError.value=''
   for(const kind of kinds){release(kind);uploads[kind]=null;removed[kind]=false}
 },{immediate:true})
@@ -29,7 +31,8 @@ function removeImage(kind:Kind){release(kind);uploads[kind]=null;removed[kind]=t
 async function save(){
   localError.value=''
   if(!name.value.trim()){tab.value='card';localError.value='Informe o nome do personagem.';return}
-  const data=new FormData();data.append('name',name.value);data.append('owner_id',owner.value);data.append('color',color.value);data.append('description',description.value);data.append('notes',notes.value)
+  if(description.value.length>20000||notes.value.length>20000){localError.value='Use até 20.000 caracteres em cada editor, incluindo formatação.';return}
+  const data=new FormData();data.append('text_format','html');data.append('name',name.value);if(props.master)data.append('owner_id',owner.value);data.append('color',color.value);data.append('description',description.value);data.append('notes',notes.value)
   for(const kind of kinds){if(uploads[kind])data.append(kind,uploads[kind]!);if(removed[kind])data.append(`remove_${kind}`,'true')}
   if(await props.save(props.character?.id??null,data))emit('close')
 }
@@ -54,13 +57,13 @@ onBeforeUnmount(()=>{for(const kind of kinds)release(kind)})
       </fieldset></div>
       <p class="character-hint">Imagens opcionais, até 10 MB cada. Criar um personagem não o adiciona ao mapa.</p>
       <label>Nome do personagem<input v-model="name" maxlength="40" :disabled="busy" placeholder="Ex.: Guardião da floresta"></label>
-      <label for="character-owner">Controlado por</label><select id="character-owner" v-model="owner" required :disabled="busy"><option v-for="member in members" :key="member.id" :value="member.id">{{ member.name }} ({{ member.role === 'mestre' ? 'mestre' : 'jogador' }})</option></select>
+      <template v-if="master"><label for="character-owner">Controlado por</label><select id="character-owner" v-model="owner" required :disabled="busy"><option v-for="member in members" :key="member.id" :value="member.id">{{ member.name }} ({{ member.role === 'mestre' ? 'mestre' : 'jogador' }})</option></select></template>
       <label class="character-color">Cor de identificação<input v-model="color" type="color" :disabled="busy"></label>
-      <label class="character-editor">Descrição do cartão<textarea v-model="description" maxlength="20000" :disabled="busy" rows="8" placeholder="Apresente o personagem, sua história e sua aparência." /></label>
+      <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
       </section>
       <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha" class="character-empty-tab"></section>
       <section v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">
-        <label class="character-editor">Anotações<textarea v-model="notes" maxlength="20000" :disabled="busy" rows="14" placeholder="Escreva as anotações do personagem." /></label>
+        <CharacterTextEditor v-model="notes" label="Anotações" :disabled="busy" />
       </section>
       <section v-show="tab === 'settings'" role="tabpanel" aria-label="Configurações da ficha" class="character-empty-tab"></section>
       <p v-if="localError || error" role="alert" class="character-error">{{ localError || error }}</p>
