@@ -1,7 +1,8 @@
+import type { CharacterSheet } from './character-sheet'
 export type Layer = 'fundo' | 'mestre' | 'geral'
 export type Rect = {x:number;y:number;width:number;height:number;rotation?:number}
 export type SceneObject = Rect & {id:string;name:string;layer:Layer;image_url:string}
-export type Character = {description_format:'plain'|'html';notes_format:'plain'|'html';description:string;notes:string;id:string;owner_id:string;name:string;color:string;appearance_url:string|null;token_url:string|null}
+export type Character = {sheet:CharacterSheet;sheet_background_url:string|null;description_format:'plain'|'html';notes_format:'plain'|'html';description:string;notes:string;id:string;owner_id:string;name:string;color:string;appearance_url:string|null;token_url:string|null}
 export type Token = {rotation:number;width:number|null;height:number|null;character_id:string;token_url:string|null; layer: Layer; id: string; owner_id: string; name: string; color: string; x: number; y: number }
 export type SceneFolder = {id:string;name:string}
 export type Scene = { folder_id:string|null; id: string; name: string; distance_per_cell: number; distance_unit: string; background_url: string | null; background_transform: Rect | null; cell_size: number; grid_type: 'square' | 'hex' | 'none'; grid_visible: boolean; grid_color: string; grid_opacity: number; snap: boolean; width: number; height: number }

@@ -109,3 +109,7 @@ Criação e edição abrem em Cartão de visita com imagens, nome, controlador, 
 ## Atualização — editor formatado e apresentação de personagens
 
 Descrição e anotações usam editor com formatação básica. Jogadores editam seus personagens sem trocar controlador; os seletores de controlador e camada ficam restritos ao mestre. Um botão de cartão abre a apresentação em leitura, e o mestre pode exibi-la às sessões de jogadores online, sem enviar anotações ou ficha. Consulte `30-editor-e-cartao-de-apresentacao.md`.
+
+## Atualização — editor visual da ficha
+
+A aba Ficha permite enviar um fundo e adicionar inputs posicionáveis, com rótulo, referência única (ex.: Força/for), tipo, largura e valor. Editar ficha alterna entre layout e preenchimento; Salvar personagem persiste tudo. Configurações da ficha continua vazia e as referências serão trabalhadas nessa aba em outra etapa. Consulte `31-editor-visual-da-ficha.md`.

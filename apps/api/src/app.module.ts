@@ -370,13 +370,13 @@ class ApiController {
     return this.characters.showCard(await this.tableAccess(id,req),characterId)
   }
   @Post('campaigns/:id/tabletop/characters')
-  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:2,fields:8,fieldSize:100000}}))
+  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1},{name:'sheet',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:3,fields:10,fieldSize:200000}}))
   async createCharacter(@Param('id') id:string,@Body() body:Record<string,unknown>,@UploadedFiles() files:CharacterFiles|undefined,@Req() req:Request){
     this.accounts.mutation(req)
     return this.characters.save(await this.tableAccess(id,req),undefined,body,files)
   }
   @Post('campaigns/:id/tabletop/characters/:characterId/settings')
-  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:2,fields:8,fieldSize:100000}}))
+  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1},{name:'sheet',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:3,fields:10,fieldSize:200000}}))
   async updateCharacter(@Param('id') id:string,@Param('characterId') characterId:string,@Body() body:Record<string,unknown>,@UploadedFiles() files:CharacterFiles|undefined,@Req() req:Request){
     this.accounts.mutation(req)
     return this.characters.save(await this.tableAccess(id,req),characterId,body,files)

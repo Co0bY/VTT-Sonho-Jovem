@@ -263,6 +263,8 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
         );
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '' CHECK(length(description)<=20000);
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS notes text NOT NULL DEFAULT '' CHECK(length(notes)<=20000);
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS sheet jsonb NOT NULL DEFAULT '{"version":1,"width":800,"height":1100,"fields":[]}'::jsonb CHECK(jsonb_typeof(sheet)='object');
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS sheet_background_file text;
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS description_format text NOT NULL DEFAULT 'plain' CHECK(description_format IN ('plain','html'));
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS notes_format text NOT NULL DEFAULT 'plain' CHECK(notes_format IN ('plain','html'));
         CREATE TABLE IF NOT EXISTS tabletop_presence (
