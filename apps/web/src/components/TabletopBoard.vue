@@ -2,9 +2,9 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { Application, Container, Graphics, Text, Texture, Sprite } from 'pixi.js'
 import type { Scene, Token, Tool, Layer, SceneObject, Rect } from '../tabletop/types'
-import { toWorld, zoomAt, tokenPosition, distance, type Camera, type Point } from '../tabletop/geometry'
+import { hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance, type Camera, type Point } from '../tabletop/geometry'
 const props = defineProps<{ scene: Scene; tokens: Token[]; objects: SceneObject[]; layer: Layer; userId: string; master: boolean; tool: Tool; selected: string; locked: boolean }>()
-const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect] }>()
+const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string] }>()
 const host = ref<HTMLDivElement>(), failure = ref(''), backgroundError = ref(''), backgroundLoading = ref(false)
 let backgroundTexture: Texture | undefined, backgroundAbort: AbortController | undefined, backgroundVersion = 0
 let app: Application | undefined, world: Container, observer: ResizeObserver | undefined, disposed = false
@@ -12,9 +12,15 @@ const objectTextures = new Map<string,Texture>()
 let objectAbort: AbortController | undefined, objectVersion=0
 let camera: Camera = { x: 0, y: 0, scale: 0.6 }
 let drag: { pointer: number; mode: 'token' | 'pan' | 'measure' | 'object' | 'background'; start: Point; camera: Camera; token?: Token; object?: SceneObject; rect?:Rect; offset?: Point; position?: Point } | undefined
+let manipulation: {pointer:number;id:string;rect:Rect;preview:Rect;handle:number;at:Point;startAngle:number} | undefined
 let ruler: { start: Point; end: Point } | undefined
 const canMove = (t: Token) => props.master || (t.layer === 'geral' && t.owner_id === props.userId)
-function clear() { for (const child of world.removeChildren()) child.destroy({ children: true }) }
+function clear(container=world) {
+  const children=container.removeChildren()
+  // Release mask relationships before destroying graphics referenced as masks.
+  for(const child of children)child.mask=null
+  for(const child of children)child.destroy({children:true})
+}
 function paint() {
   if (!app || !world || disposed) return
   clear()
@@ -25,8 +31,8 @@ function paint() {
   world.addChild(base)
   if (backgroundTexture) {
     const sprite = new Sprite(backgroundTexture)
-    const rect = drag?.mode === 'background' && drag.rect ? {...drag.rect,...drag.position} : backgroundBounds()!
-    sprite.width=rect.width;sprite.height=rect.height;sprite.x=rect.x;sprite.y=rect.y
+    const rect = manipulation?.id==='background'?manipulation.preview:drag?.mode === 'background' && drag.rect ? {...drag.rect,...drag.position} : backgroundBounds()!
+    sprite.width=rect.width;sprite.height=rect.height;sprite.anchor.set(0.5);sprite.x=rect.x+rect.width/2;sprite.y=rect.y+rect.height/2;sprite.angle=rect.rotation??0
     world.addChild(sprite)
   }
   const compass = new Graphics().circle(width / 2, height / 2, 230).stroke({ color: 0x80768e, width: 2, alpha: 0.12 })
@@ -34,9 +40,9 @@ function paint() {
   if (!backgroundTexture) world.addChild(compass); else compass.destroy()
   function drawObjects(layer:Layer){
     for(const object of props.objects.filter(object=>object.layer===layer)){
-      const rect=drag?.object?.id===object.id&&drag.position?{...object,...drag.position}:object
+      const rect=manipulation?.id===object.id?manipulation.preview:drag?.object?.id===object.id&&drag.position?{...object,...drag.position}:object
       const texture=objectTextures.get(object.id)
-      const item=new Container();item.position.set(rect.x,rect.y)
+      const item=new Container();item.position.set(rect.x+rect.width/2,rect.y+rect.height/2);item.pivot.set(rect.width/2,rect.height/2);item.angle=rect.rotation??0
       if(texture){const sprite=new Sprite(texture);sprite.width=rect.width;sprite.height=rect.height;item.addChild(sprite)}
       else item.addChild(new Graphics().rect(0,0,rect.width,rect.height).fill({color:0x69517e,alpha:0.4}))
       if(props.selected===`object:${object.id}`)item.addChild(new Graphics().rect(0,0,rect.width,rect.height).stroke({color:0xd6b0ff,width:2/camera.scale}))
@@ -58,13 +64,20 @@ function paint() {
   }
   }
   drawObjects('fundo');drawTokens('fundo')
-  if (props.scene.grid_visible) {
+  if (props.scene.grid_type!=='none') {
     const grid = new Graphics()
+    if(props.scene.grid_type==='hex'){
+      const topLeft=toWorld({x:0,y:0},camera),bottomRight=toWorld({x:app.screen.width,y:app.screen.height},camera)
+      for(const [a,b] of hexGridSegments(cell,width,height,{left:topLeft.x,top:topLeft.y,right:bottomRight.x,bottom:bottomRight.y}))grid.moveTo(a.x,a.y).lineTo(b.x,b.y)
+      const mask=new Graphics().rect(0,0,width,height).fill(0xffffff);world.addChild(mask);grid.mask=mask
+    }else{
     for (let x = 0; x <= width; x += cell) grid.moveTo(x, 0).lineTo(x, height)
     for (let y = 0; y <= height; y += cell) grid.moveTo(0, y).lineTo(width, y)
-    grid.stroke({ color: 0xa29aad, width: 1, alpha: 0.16 }); world.addChild(grid)
+    }
+    grid.stroke({ color: props.scene.grid_color, width: 1, alpha: props.scene.grid_opacity }); world.addChild(grid)
   }
   drawObjects('geral');drawTokens('geral');drawObjects('mestre');drawTokens('mestre')
+  drawHandles()
   if (ruler) {
     world.addChild(new Graphics().moveTo(ruler.start.x, ruler.start.y).lineTo(ruler.end.x, ruler.end.y).stroke({ color: 0xe5be75, width: 3 / camera.scale }).circle(ruler.start.x, ruler.start.y, 4 / camera.scale).fill(0xe5be75).circle(ruler.end.x, ruler.end.y, 4 / camera.scale).fill(0xe5be75))
     const text = new Text({ text: `${distance(ruler.start, ruler.end, cell, props.scene.distance_per_cell).toLocaleString('pt-BR', {maximumFractionDigits: 6})} ${props.scene.distance_unit}`, style: { fontFamily: 'Arial', fontSize: 15, fill: '#ffe0a1', stroke: { color: '#17131e', width: 5 } } })
@@ -89,12 +102,29 @@ async function loadObjects(){
   }));paint()
 }
 watch(()=>props.objects.map(object=>object.id+object.image_url).join('|'),loadObjects)
-const contains=(p:Point,r:Rect)=>p.x>=r.x&&p.y>=r.y&&p.x<=r.x+r.width&&p.y<=r.y+r.height
+const contains=(p:Point,r:Rect)=>imageContains(r,p)
+function selectedImage(){
+  if(!props.master||props.tool!=='select')return
+  if(props.selected==='background'&&props.layer==='fundo'){const rect=backgroundBounds();if(rect)return {id:'background',rect}}
+  const object=props.objects.find(o=>`object:${o.id}`===props.selected&&o.layer===props.layer)
+  if(object)return {id:object.id,rect:object}
+}
+function handles(rect:Rect){return [[0,0],[rect.width,0],[rect.width,rect.height],[0,rect.height],[rect.width/2,-30/camera.scale]].map(([x,y])=>imagePoint(rect,x!,y!))}
+function drawHandles(){
+  const selected=selectedImage();if(!selected)return
+  const rect=manipulation?.preview||(drag?.rect?{...drag.rect,...drag.position}:selected.rect)
+  const points=handles(rect),g=new Graphics(),size=5/camera.scale
+  g.poly(points.slice(0,4).flatMap(p=>[p.x,p.y])).closePath().stroke({color:0xd6b0ff,width:2/camera.scale})
+  const top=imagePoint(rect,rect.width/2,0)
+  g.moveTo(top.x,top.y).lineTo(points[4]!.x,points[4]!.y).stroke({color:0xd6b0ff,width:2/camera.scale})
+  points.forEach((p,i)=>{if(i===4)g.circle(p.x,p.y,size+1/camera.scale);else g.rect(p.x-size,p.y-size,size*2,size*2);g.fill(0xffffff).stroke({color:0x8052ae,width:1/camera.scale})})
+  world.addChild(g)
+}
 function doubleClick(event:MouseEvent){
   if(!props.master||props.tool!=='select'||props.locked)return
   const at=toWorld(point(event),camera)
   const object=[...props.objects].reverse().find(object=>object.layer===props.layer&&contains(at,object))
-  if(object){emit('edit',object.id,{x:object.x,y:object.y,width:object.width,height:object.height});return}
+  if(object){emit('edit',object.id,{x:object.x,y:object.y,width:object.width,height:object.height,rotation:object.rotation??0});return}
   const rect=backgroundBounds();if(props.layer==='fundo'&&rect&&contains(at,rect))emit('edit','background',rect)
 }
 async function loadBackground() {
@@ -116,10 +146,15 @@ async function loadBackground() {
 watch(() => props.scene.background_url, loadBackground)
 function point(event: PointerEvent | WheelEvent | MouseEvent): Point { const bounds = host.value!.getBoundingClientRect(); return { x: event.clientX - bounds.left, y: event.clientY - bounds.top } }
 function down(event: PointerEvent) {
-  if (drag || !app || !host.value) return
+  if (drag || manipulation || !app || !host.value) return
   if (![0, 1, 2].includes(event.button)) return
   event.preventDefault(); host.value.focus(); host.value.setPointerCapture(event.pointerId)
   const screen = point(event), at = toWorld(screen, camera)
+  const selected=selectedImage()
+  if(selected&&!props.locked&&event.button===0){
+    const handle=handles(selected.rect).findIndex(p=>Math.hypot(p.x-at.x,p.y-at.y)<=11/camera.scale)
+    if(handle>=0){manipulation={pointer:event.pointerId,id:selected.id,rect:{...selected.rect},preview:{...selected.rect},handle,at,startAngle:Math.atan2(at.y-selected.rect.y-selected.rect.height/2,at.x-selected.rect.x-selected.rect.width/2)};return}
+  }
   if (props.tool === 'measure' && event.button === 0) {
     ruler = { start: at, end: at }; drag = { pointer: event.pointerId, mode: 'measure', start: at, camera: { ...camera } }
   } else {
@@ -133,22 +168,40 @@ function down(event: PointerEvent) {
       const rect=object||background
       if(rect && (object||contains(at,rect)) && !props.locked){
         emit('select',object?`object:${object.id}`:'background')
-        drag={pointer:event.pointerId,mode:object?'object':'background',object,rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},start:at,camera:{...camera},offset:{x:at.x-rect.x,y:at.y-rect.y},position:{x:rect.x,y:rect.y}}
+        drag={pointer:event.pointerId,mode:object?'object':'background',object,rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height,rotation:rect.rotation??0},start:at,camera:{...camera},offset:{x:at.x-rect.x,y:at.y-rect.y},position:{x:rect.x,y:rect.y}}
       }else{if(props.tool==='select')emit('select','');drag={pointer:event.pointerId,mode:'pan',start:screen,camera:{...camera}}}
     }
   }
   paint()
 }
 function move(event: PointerEvent) {
+  if(host.value&&!drag&&!manipulation){
+    const selected=selectedImage(),at=toWorld(point(event),camera)
+    const handle=selected&&!props.locked?handles(selected.rect).findIndex(p=>Math.hypot(p.x-at.x,p.y-at.y)<=11/camera.scale):-1
+    host.value.style.cursor=handle===4?'grab':handle>=0?'crosshair':''
+  }
+  if(manipulation){
+    if(manipulation.pointer!==event.pointerId)return
+    manipulation.at=toWorld(point(event),camera)
+    updateManipulation(event.altKey);return
+  }
   if (!drag || drag.pointer !== event.pointerId) return
   const at = point(event)
   if (drag.mode === 'pan') { camera.x = drag.camera.x + at.x - drag.start.x; camera.y = drag.camera.y + at.y - drag.start.y }
   if (drag.mode === 'measure') ruler = { start: drag.start, end: toWorld(at, camera) }
   if(drag.mode==='object'||drag.mode==='background'){const atWorld=toWorld(at,camera);drag.position={x:Math.max(0,Math.min(props.scene.width-drag.rect!.width,atWorld.x-drag.offset!.x)),y:Math.max(0,Math.min(props.scene.height-drag.rect!.height,atWorld.y-drag.offset!.y))}}
-  if (drag.mode === 'token') { const worldPoint = toWorld(at, camera); drag.position = tokenPosition({ x: worldPoint.x - drag.offset!.x, y: worldPoint.y - drag.offset!.y }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height) }
+  if (drag.mode === 'token') { const worldPoint = toWorld(at, camera); drag.position = tokenPosition({ x: worldPoint.x - drag.offset!.x, y: worldPoint.y - drag.offset!.y }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height, props.scene.grid_type) }
+  paint()
+}
+function updateManipulation(free:boolean){
+  if(!manipulation)return
+  const m=manipulation,r=m.rect,at=m.at
+  const next=m.handle===4?{...r,rotation:((r.rotation??0)+(Math.atan2(at.y-r.y-r.height/2,at.x-r.x-r.width/2)-m.startAngle)*180/Math.PI+720)%360}:resizeImage(r,at,m.handle,{proportional:!free,cell:props.scene.grid_type==='none'?1:props.scene.cell_size})
+  if(next.x>=-1e-8&&next.y>=-1e-8&&next.x+next.width<=props.scene.width+1e-8&&next.y+next.height<=props.scene.height+1e-8)m.preview={...next,x:Math.max(0,next.x),y:Math.max(0,next.y)}
   paint()
 }
 function up(event: PointerEvent) {
+  if(manipulation){if(manipulation.pointer!==event.pointerId)return;const m=manipulation;manipulation=undefined;if(host.value?.hasPointerCapture(event.pointerId))host.value.releasePointerCapture(event.pointerId);if(event.type!=='pointercancel')emit('transform',m.id,m.preview);paint();return}
   if (!drag || drag.pointer !== event.pointerId) return
   const finished = drag; drag = undefined
   if (host.value?.hasPointerCapture(event.pointerId)) host.value.releasePointerCapture(event.pointerId)
@@ -156,25 +209,48 @@ function up(event: PointerEvent) {
   if(event.type!=='pointercancel'&&(finished.mode==='object'||finished.mode==='background')&&finished.rect&&finished.position&&(Math.abs(finished.rect.x-finished.position.x)>0.5||Math.abs(finished.rect.y-finished.position.y)>0.5))emit('transform',finished.object?.id||'background',{...finished.rect,...finished.position})
   paint()
 }
-function wheel(event: WheelEvent) { event.preventDefault(); if (!drag) { camera = zoomAt(camera, point(event), camera.scale * Math.exp(-event.deltaY * 0.001)); emit('zoom', Math.round(camera.scale * 100)); paint() } }
+function wheel(event: WheelEvent) { event.preventDefault(); if (!drag && !manipulation) { camera = zoomAt(camera, point(event), camera.scale * Math.exp(-event.deltaY * 0.001)); emit('zoom', Math.round(camera.scale * 100)); paint() } }
 function zoomBy(factor: number) { if (!host.value) return; camera = zoomAt(camera, { x: host.value.clientWidth / 2, y: host.value.clientHeight / 2 }, camera.scale * factor); emit('zoom', Math.round(camera.scale * 100)); paint() }
 function center() {
   if (!host.value) return
-  camera.scale = Math.max(0.02, Math.min(1, Math.min((host.value.clientWidth - 60) / props.scene.width, (host.value.clientHeight - 60) / props.scene.height)))
+  camera.scale = Math.max(0.02, Math.min(1, Math.min((host.value.clientWidth - 140) / props.scene.width, (host.value.clientHeight - 140) / props.scene.height)))
   camera.x = (host.value.clientWidth - props.scene.width * camera.scale) / 2; camera.y = (host.value.clientHeight - props.scene.height * camera.scale) / 2
   emit('zoom', Math.round(camera.scale * 100)); ruler = undefined; paint()
 }
 function keyboard(event: KeyboardEvent) {
-  if (event.key === 'Escape') { ruler = undefined; emit('select', ''); paint(); return }
+  if((event.target as HTMLElement).closest('input,textarea,select,[contenteditable="true"]'))return
+  if(event.key==='Alt'&&manipulation){event.preventDefault();updateManipulation(event.altKey);return}
+  if(event.type==='keyup')return
+  if(event.key==='Delete'){
+    if(event.repeat||event.ctrlKey||event.metaKey||event.altKey||!props.master||props.locked||drag||manipulation||props.tool!=='select')return
+    const token=props.tokens.find(t=>t.id===props.selected&&t.layer===props.layer)
+    const object=props.objects.find(o=>`object:${o.id}`===props.selected&&o.layer===props.layer)
+    if(token||object){event.preventDefault();emit('remove',props.selected)}
+    return
+  }
+  if (event.key === 'Escape') { manipulation=undefined;drag=undefined;ruler = undefined; emit('select', ''); paint(); return }
   const token = props.tokens.find(t => t.id === props.selected)
   const directions: Record<string, Point> = { ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 }, ArrowUp: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 } }
   const direction = directions[event.key]
   if (!token || token.layer!==props.layer || !direction || !canMove(token) || props.locked) return
-  event.preventDefault(); emit('move', token.id, tokenPosition({ x: token.x + direction.x * props.scene.cell_size, y: token.y + direction.y * props.scene.cell_size }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height))
+  event.preventDefault(); emit('move', token.id, tokenPosition({ x: token.x + direction.x * props.scene.cell_size, y: token.y + direction.y * props.scene.cell_size }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height, props.scene.grid_type))
 }
+// Recreate the render tree when changing grid topology. Keep camera and loaded
+// textures, but discard the previous shape's graphics and mask/render state.
+watch(() => props.scene.grid_type, () => {
+  if(!app||!world||disposed)return
+  drag=undefined;manipulation=undefined
+  const previous=world
+  world=new Container()
+  app.stage.removeChild(previous)
+  clear(previous)
+  previous.destroy()
+  app.stage.addChild(world)
+  paint()
+}, {flush:'post'})
 watch(() => [props.tokens, props.objects, props.scene, props.selected,props.layer], paint, { deep: true })
-watch(()=>[props.scene.width,props.scene.height],()=>{drag=undefined;center()})
-watch(() => [props.tool,props.layer], () => { drag = undefined; paint() })
+watch([()=>props.scene.width,()=>props.scene.height],()=>{manipulation=undefined;drag=undefined;center()})
+watch(() => [props.tool,props.layer], () => { manipulation=undefined;drag = undefined; paint() })
 onMounted(async () => {
   const instance = new Application()
   try {
@@ -195,5 +271,5 @@ onMounted(async () => {
 onBeforeUnmount(() => { disposed = true; backgroundVersion++; backgroundAbort?.abort();objectVersion++;objectAbort?.abort(); observer?.disconnect(); host.value?.removeEventListener('wheel', wheel); if (app) app.destroy(true, { children: true }); backgroundTexture?.destroy(true);for(const texture of objectTextures.values())texture.destroy(true) })
 defineExpose({ zoomBy, center })
 </script>
-<template><div ref="host" class="pixi-board" :class="`tool-${tool}`" tabindex="0" role="application" aria-label="Cenário da mesa. Arraste para navegar, use a roda para zoom. Selecione um token e use as setas para movê-lo." @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up" @contextmenu.prevent @dblclick="doubleClick" @keydown="keyboard"><p v-if="failure" role="alert" class="board-failure">{{ failure }}</p><p v-if="backgroundLoading" class="background-status" role="status">Carregando imagem…</p><p v-if="backgroundError" class="background-status" role="alert">{{ backgroundError }}</p></div></template>
+<template><div ref="host" class="pixi-board" :class="`tool-${tool}`" tabindex="0" role="application" aria-label="Cenário da mesa. Arraste para navegar, use a roda para zoom. Selecione um token e use as setas para movê-lo ou Delete para excluir. Imagens: cantos mantêm proporção no grid; Alt permite tamanho livre." @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up" @contextmenu.prevent @dblclick="doubleClick" @keydown="keyboard" @keyup="keyboard"><p v-if="failure" role="alert" class="board-failure">{{ failure }}</p><p v-if="backgroundLoading" class="background-status" role="status">Carregando imagem…</p><p v-if="backgroundError" class="background-status" role="alert">{{ backgroundError }}</p></div></template>
 <style scoped>.pixi-board{width:100%;height:100%;overflow:hidden;touch-action:none;outline:none;position:relative}.pixi-board:focus-visible{box-shadow:inset 0 0 0 2px #b48ce9}.pixi-board :deep(canvas){display:block}.tool-pan{cursor:grab}.tool-measure{cursor:crosshair}.board-failure{padding:40px;color:#ffd1d8;max-width:500px}.background-status{position:absolute;bottom:65px;left:20px;background:#2d203c;color:#e0caef;font-size:11px;padding:10px;border-radius:6px;z-index:2}</style>
