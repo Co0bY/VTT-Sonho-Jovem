@@ -81,3 +81,7 @@ O guia completo de WSL, Ubuntu, Docker Desktop, Node/pnpm, configuração e reto
 ## Versionamento das atualizações
 
 As entregas acumuladas foram organizadas em commits Conventional Commits por API, interface, testes e documentação, com publicação autorizada para `origin/main`. Consulte `21-versionamento-e-publicacao.md` para a sequência, validações utilizadas e forma de conferir o envio.
+
+## Fluxo atual — branches e Pull Requests
+
+A partir de agora, novas entregas usam branches temáticas, commits Conventional Commits, publicação em `origin` e PRs inicialmente em rascunho para `main`. Não desenvolver novas entregas diretamente em `main`; merge somente por solicitação explícita do usuário. O modo mentoria permanece ativo. A próxima frente foi aberta em `feat/tokens-e-fichas-de-jogadores`; o escopo funcional de tokens/fichas ainda será detalhado. As instruções persistem em `AGENTS.md` e o fluxo está explicado em `22-fluxo-de-branches-e-prs.md`.
