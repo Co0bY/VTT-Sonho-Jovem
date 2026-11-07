@@ -81,3 +81,23 @@ O guia completo de WSL, Ubuntu, Docker Desktop, Node/pnpm, configuração e reto
 ## Versionamento das atualizações
 
 As entregas acumuladas foram organizadas em commits Conventional Commits por API, interface, testes e documentação, com publicação autorizada para `origin/main`. Consulte `21-versionamento-e-publicacao.md` para a sequência, validações utilizadas e forma de conferir o envio.
+
+## Fluxo atual — branches e Pull Requests
+
+A partir de agora, novas entregas usam branches temáticas, commits Conventional Commits, publicação em `origin` e PRs inicialmente em rascunho para `main`. Não desenvolver novas entregas diretamente em `main`; merge somente por solicitação explícita do usuário. O modo mentoria permanece ativo. A próxima frente foi aberta em `feat/tokens-e-fichas-de-jogadores`; o escopo funcional de tokens/fichas ainda será detalhado. As instruções persistem em `AGENTS.md` e o fluxo está explicado em `22-fluxo-de-branches-e-prs.md`.
+
+## Atualização — personagens, aparência e token
+
+A branch `feat/tokens-e-fichas-de-jogadores` separa personagens da campanha de suas presenças em cenários. O painel Personagens usa Aparência; o mapa usa a imagem de Token. Criar um personagem abre pop-up com os dois seletores no topo e não adiciona presença automaticamente. Cartões podem ser arrastados ou adicionados pelo botão. Cenários vazios são permitidos; remover presença ou excluir cenário preserva o personagem. Tokens anteriores são migrados sem perder posições ou controle. Consulte `23-personagens-aparencia-e-token.md` para uso, modelo, permissões e testes.
+
+## Atualização — tamanho e transparência de tokens
+
+Tokens no mapa recebem quatro alças de redimensionamento, com proporção/grid por padrão e Alt para tamanho livre. Dimensões são persistidas por presença; movimento e limites consideram o tamanho ampliado. O redimensionamento é só por arraste, sem pop-up. Imagens transparentes não têm círculo de cor nem sombra atrás; a identificação por cor passa para o nome abaixo do token. Delete mantém a remoção da presença sem apagar personagem. Consulte `24-tamanho-e-transparencia-dos-tokens.md` para regras e validações.
+
+## Atualização — rotação e marcador sem imagem
+
+Tokens selecionados agora têm alça circular para girar, com ângulo salvo por presença. O nome permanece horizontal; seleção e redimensionamento acompanham o giro. Sem imagem de Token, o marcador usa a cor de identificação e uma inicial; com imagem, a transparência continua preservada. Consulte `25-rotacao-e-marcador-dos-tokens.md` para uso, persistência e validações.
+
+## Atualização — tamanho mínimo ao mover e giro em passos
+
+Ao colocar ou mover tokens menores que uma célula, a presença cresce proporcionalmente até o lado maior alcançar a célula; tokens maiores são preservados. Sem grid, não há esse ajuste. As alças de rotação agora usam passos de 15 graus, com Alt para giro livre, e a API aplica essa regra aos tokens. Consulte `26-tamanho-minimo-e-passos-de-rotacao.md` para exemplos e validações.

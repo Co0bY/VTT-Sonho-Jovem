@@ -6,7 +6,8 @@
     "build": "tsc",
     "test:integration": "pnpm run build && node --env-file=../../.env test/integration.cjs && node --env-file=../../.env test/password-reset.cjs",
     "test:browser": "pnpm run build && node --env-file=../../.env test/tabletop-browser.cjs",
-    "test:scenes": "pnpm run build && node --env-file=../../.env test/scenes.cjs"
+    "test:scenes": "pnpm run build && node --env-file=../../.env test/scenes.cjs",
+    "test:characters": "pnpm run build && node --env-file=../../.env test/characters.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

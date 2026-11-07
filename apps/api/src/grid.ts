@@ -15,3 +15,8 @@ export function hexPosition(point: {x:number;y:number}, cell:number, width:numbe
   }
   return best
 }
+
+export function minimumTokenSize(size:{width:number;height:number},cell:number,gridType='square'){
+  const scale=gridType==='none'?1:Math.max(1,cell/Math.max(size.width,size.height))
+  return {width:size.width*scale,height:size.height*scale}
+}

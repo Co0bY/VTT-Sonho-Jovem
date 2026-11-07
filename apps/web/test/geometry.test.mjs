@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { hexGridSegments, hexPosition, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance } from '../src/tabletop/geometry.ts'
+import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, hexPosition, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance } from '../src/tabletop/geometry.ts'
 test('zoom preserves world point beneath cursor and clamps zoom', () => {
   const camera = {x:100,y:-50,scale:0.8}, cursor={x:333,y:222}
   const before = toWorld(cursor,camera)
@@ -93,4 +93,39 @@ test('hex grid edges have equal lengths and are not drawn twice',()=>{
   }
   assert.ok(lines.length>0)
   assert.ok(hexGridSegments(64,16384,16384,{left:100,top:100,right:600,bottom:600}).length<1000)
+})
+
+test('token bounds preserve the image aspect until an explicit drag size is saved',()=>{
+  assert.deepEqual(tokenBounds({x:100,y:100,width:null,height:null},100,{width:40,height:80}),{x:80,y:60,width:40,height:80,rotation:0})
+  assert.deepEqual(tokenBounds({x:100,y:100,width:120,height:60},100,{width:40,height:80}),{x:40,y:70,width:120,height:60,rotation:0})
+})
+test('resized tokens stay completely inside the scene during movement',()=>{
+  for(const grid of ['square','hex','none']){
+    const point=tokenPosition({x:-100,y:9999},64,true,512,384,grid,{width:200,height:100})
+    assert.ok(point.x>=100&&point.x<=412&&point.y>=50&&point.y<=334)
+  }
+})
+
+test('token bounds preserve rotation for handles, hit testing and corner resizing',()=>{
+  const bounds=tokenBounds({x:200,y:200,width:120,height:40,rotation:90},64)
+  assert.equal(bounds.rotation,90)
+  assert.equal(imageContains(bounds,{x:200,y:250}),true)
+  assert.equal(imageContains(bounds,{x:250,y:200}),false)
+  const fixed=imagePoint(bounds,0,0),point=imagePoint(bounds,160,80)
+  const next=resizeImage(bounds,point,2,{proportional:false})
+  const after=imagePoint(next,0,0)
+  assert.equal(next.rotation,90)
+  assert.ok(Math.hypot(after.x-fixed.x,after.y-fixed.y)<1e-8)
+})
+
+test('small tokens grow proportionally to a cell while large tokens keep their size',()=>{
+  assert.deepEqual(minimumTokenSize({width:20,height:40},64),{width:32,height:64})
+  assert.deepEqual(minimumTokenSize({width:40,height:40},64),{width:64,height:64})
+  assert.deepEqual(minimumTokenSize({width:100,height:50},64),{width:100,height:50})
+  assert.deepEqual(minimumTokenSize({width:20,height:20},64,'none'),{width:20,height:20})
+})
+test('rotation snaps every 15 degrees unless Alt enables free rotation',()=>{
+  for(const [angle,expected] of [[7,0],[8,15],[23,30],[44,45],[359,0],[-17,345],[721,0]])assert.equal(rotationAngle(angle),expected)
+  assert.ok(Math.abs(rotationAngle(23.4,true)-23.4)<1e-8)
+  assert.ok(Math.abs(rotationAngle(-17.2,true)-342.8)<1e-8)
 })

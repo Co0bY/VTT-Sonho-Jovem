@@ -9,10 +9,11 @@ export function zoomAt(camera: Camera, point: Point, scale: number): Camera {
   const nextScale = clamp(scale, 0.02, 2.5)
   return { x: point.x - world.x * nextScale, y: point.y - world.y * nextScale, scale: nextScale }
 }
-export function tokenPosition(point: Point, cell: number, snap: boolean, width: number, height: number, gridType='square'): Point {
-  if(snap&&gridType==='hex')return hexPosition(point,cell,width,height)
+export function tokenPosition(point: Point, cell: number, snap: boolean, width: number, height: number, gridType='square', size?:{width:number|null;height:number|null}): Point {
+  const hex=snap&&gridType==='hex'?hexPosition(point,cell,width,height):null
   const align = (n: number, limit: number) => clamp(snap && gridType!=='none' ? Math.floor(n / cell) * cell + cell / 2 : n, cell / 2, limit - cell / 2)
-  return { x: align(point.x, width), y: align(point.y, height) }
+  const marginX=Math.max(cell/2,(size?.width??0)/2),marginY=Math.max(cell/2,(size?.height??0)/2)
+  return {x:clamp(hex?.x??align(point.x,width),marginX,width-marginX),y:clamp(hex?.y??align(point.y,height),marginY,height-marginY)}
 }
 export function distance(a: Point, b: Point, cell: number, perCell = 1.5): number {
   return Math.hypot(a.x - b.x, a.y - b.y) / cell * perCell
@@ -78,4 +79,20 @@ export function hexGridSegments(cell:number, width:number, height:number, view={
     }
   }
   return segments
+}
+
+export function tokenBounds(token:Point & {width:number|null;height:number|null;rotation?:number}, cell:number, texture?:{width:number;height:number}): ImageRect {
+  const scale=texture?Math.min(cell*0.8/texture.width,cell*0.8/texture.height):1
+  const width=token.width??(texture?texture.width*scale:cell*0.8),height=token.height??(texture?texture.height*scale:cell*0.8)
+  return {x:token.x-width/2,y:token.y-height/2,width,height,rotation:token.rotation??0}
+}
+
+export function minimumTokenSize(size:{width:number;height:number},cell:number,gridType='square'){
+  const scale=gridType==='none'?1:Math.max(1,cell/Math.max(size.width,size.height))
+  return {width:size.width*scale,height:size.height*scale}
+}
+
+export function rotationAngle(angle:number,free=false){
+  const rotation=free?angle:Math.round(angle/15)*15
+  return ((rotation%360)+360)%360
 }

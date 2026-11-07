@@ -188,13 +188,21 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
       await client.query(`
         ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS width integer NOT NULL DEFAULT 3200 CHECK(width BETWEEN 128 AND 16384);
         ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS height integer NOT NULL DEFAULT 2200 CHECK(height BETWEEN 128 AND 16384);
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS rotation double precision NOT NULL DEFAULT 0 CHECK(rotation>=0 AND rotation<360);
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS width double precision CHECK(width BETWEEN 8 AND 16384);
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS height double precision CHECK(height BETWEEN 8 AND 16384);
+        DO $$ BEGIN
+          IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='tabletop_token_dimensions_pair') THEN
+            ALTER TABLE tabletop_tokens ADD CONSTRAINT tabletop_token_dimensions_pair CHECK((width IS NULL)=(height IS NULL));
+          END IF;
+        END $$;
         ALTER TABLE tabletop_tokens DROP CONSTRAINT IF EXISTS tabletop_tokens_x_check;
         ALTER TABLE tabletop_tokens DROP CONSTRAINT IF EXISTS tabletop_tokens_y_check;
         CREATE OR REPLACE FUNCTION check_tabletop_item_bounds() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE scene record; BEGIN
           SELECT width,height INTO scene FROM tabletop_scenes WHERE id=NEW.scene_id FOR SHARE;
           IF TG_TABLE_NAME='tabletop_tokens' THEN
-            IF NEW.x<0 OR NEW.y<0 OR NEW.x>scene.width OR NEW.y>scene.height THEN
+            IF NEW.x<0 OR NEW.y<0 OR NEW.x>scene.width OR NEW.y>scene.height OR (NEW.width IS NOT NULL AND (NEW.x-NEW.width/2<0 OR NEW.y-NEW.height/2<0 OR NEW.x+NEW.width/2>scene.width OR NEW.y+NEW.height/2>scene.height)) THEN
               RAISE EXCEPTION 'Token fora do cenário' USING ERRCODE='23514';
             END IF;
           ELSE
@@ -213,7 +221,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
           SELECT * INTO scene FROM tabletop_scenes WHERE id=NEW.id;
           IF NOT FOUND THEN RETURN NULL; END IF;
           rect:=scene.background_transform;
-          IF EXISTS(SELECT 1 FROM tabletop_tokens WHERE scene_id=scene.id AND (x<0 OR y<0 OR x>scene.width OR y>scene.height))
+          IF EXISTS(SELECT 1 FROM tabletop_tokens WHERE scene_id=scene.id AND (x<0 OR y<0 OR x>scene.width OR y>scene.height OR (width IS NOT NULL AND (x-width/2<0 OR y-height/2<0 OR x+width/2>scene.width OR y+height/2>scene.height))))
             OR EXISTS(SELECT 1 FROM tabletop_objects WHERE scene_id=scene.id AND (x<0 OR y<0 OR x+width>scene.width OR y+height>scene.height))
             OR (rect IS NOT NULL AND ((rect->>'x')::float<0 OR (rect->>'y')::float<0 OR (rect->>'width')::float<8 OR (rect->>'height')::float<8
               OR (rect->>'x')::float+(rect->>'width')::float>scene.width OR (rect->>'y')::float+(rect->>'height')::float>scene.height)) THEN
@@ -240,6 +248,43 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
           END IF;
         END $$;
         CREATE INDEX IF NOT EXISTS tabletop_scenes_folder_idx ON tabletop_scenes(folder_id);
+      `)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS tabletop_characters (
+          id uuid PRIMARY KEY,
+          campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name varchar(40) NOT NULL CHECK(length(btrim(name))>0),
+          color varchar(7) NOT NULL CHECK(color ~ '^#[0-9a-fA-F]{6}$'),
+          appearance_file text,
+          token_file text,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          UNIQUE(id,campaign_id)
+        );
+        CREATE INDEX IF NOT EXISTS tabletop_characters_campaign_idx ON tabletop_characters(campaign_id);
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS character_id uuid;
+        INSERT INTO tabletop_characters(id,campaign_id,owner_id,name,color,created_at)
+          SELECT id,campaign_id,owner_id,name,color,created_at FROM tabletop_tokens WHERE character_id IS NULL
+          ON CONFLICT(id) DO NOTHING;
+        UPDATE tabletop_tokens SET character_id=id WHERE character_id IS NULL;
+        ALTER TABLE tabletop_tokens ALTER COLUMN character_id SET NOT NULL;
+        CREATE INDEX IF NOT EXISTS tabletop_tokens_character_idx ON tabletop_tokens(character_id);
+        DO $$ BEGIN
+          IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='tabletop_token_character_fk') THEN
+            ALTER TABLE tabletop_tokens ADD CONSTRAINT tabletop_token_character_fk FOREIGN KEY(character_id,campaign_id)
+              REFERENCES tabletop_characters(id,campaign_id) ON DELETE CASCADE;
+          END IF;
+        END $$;
+        -- Keep the previous JSON token endpoint compatible without creating anything on scene reads.
+        CREATE OR REPLACE FUNCTION initialize_token_character() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+          IF NEW.character_id IS NULL THEN
+            INSERT INTO tabletop_characters(id,campaign_id,owner_id,name,color) VALUES(NEW.id,NEW.campaign_id,NEW.owner_id,NEW.name,NEW.color);
+            NEW.character_id:=NEW.id;
+          END IF;
+          RETURN NEW;
+        END $$;
+        DROP TRIGGER IF EXISTS tabletop_token_character ON tabletop_tokens;
+        CREATE TRIGGER tabletop_token_character BEFORE INSERT ON tabletop_tokens FOR EACH ROW EXECUTE FUNCTION initialize_token_character();
       `)
       await client.query('COMMIT')
     } catch (error) { await client.query('ROLLBACK'); throw error }
