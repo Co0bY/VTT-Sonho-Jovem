@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { hexGridSegments, hexPosition, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance } from '../src/tabletop/geometry.ts'
+import { tokenBounds, hexGridSegments, hexPosition, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance } from '../src/tabletop/geometry.ts'
 test('zoom preserves world point beneath cursor and clamps zoom', () => {
   const camera = {x:100,y:-50,scale:0.8}, cursor={x:333,y:222}
   const before = toWorld(cursor,camera)
@@ -93,4 +93,15 @@ test('hex grid edges have equal lengths and are not drawn twice',()=>{
   }
   assert.ok(lines.length>0)
   assert.ok(hexGridSegments(64,16384,16384,{left:100,top:100,right:600,bottom:600}).length<1000)
+})
+
+test('token bounds preserve the image aspect until an explicit drag size is saved',()=>{
+  assert.deepEqual(tokenBounds({x:100,y:100,width:null,height:null},100,{width:40,height:80}),{x:80,y:60,width:40,height:80})
+  assert.deepEqual(tokenBounds({x:100,y:100,width:120,height:60},100,{width:40,height:80}),{x:40,y:70,width:120,height:60})
+})
+test('resized tokens stay completely inside the scene during movement',()=>{
+  for(const grid of ['square','hex','none']){
+    const point=tokenPosition({x:-100,y:9999},64,true,512,384,grid,{width:200,height:100})
+    assert.ok(point.x>=100&&point.x<=412&&point.y>=50&&point.y<=334)
+  }
 })

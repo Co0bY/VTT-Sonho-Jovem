@@ -89,3 +89,7 @@ A partir de agora, novas entregas usam branches temáticas, commits Conventional
 ## Atualização — personagens, aparência e token
 
 A branch `feat/tokens-e-fichas-de-jogadores` separa personagens da campanha de suas presenças em cenários. O painel Personagens usa Aparência; o mapa usa a imagem de Token. Criar um personagem abre pop-up com os dois seletores no topo e não adiciona presença automaticamente. Cartões podem ser arrastados ou adicionados pelo botão. Cenários vazios são permitidos; remover presença ou excluir cenário preserva o personagem. Tokens anteriores são migrados sem perder posições ou controle. Consulte `23-personagens-aparencia-e-token.md` para uso, modelo, permissões e testes.
+
+## Atualização — tamanho e transparência de tokens
+
+Tokens no mapa recebem quatro alças de redimensionamento, com proporção/grid por padrão e Alt para tamanho livre. Dimensões são persistidas por presença; movimento e limites consideram o tamanho ampliado. O redimensionamento é só por arraste, sem pop-up. Imagens transparentes não têm círculo de cor nem sombra atrás; a identificação por cor passa para o nome abaixo do token. Delete mantém a remoção da presença sem apagar personagem. Consulte `24-tamanho-e-transparencia-dos-tokens.md` para regras e validações.

@@ -2,9 +2,9 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { Application, Container, Graphics, Text, Texture, Sprite } from 'pixi.js'
 import type { Scene, Token, Tool, Layer, SceneObject, Rect } from '../tabletop/types'
-import { hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance, type Camera, type Point } from '../tabletop/geometry'
+import { tokenBounds, hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance, type Camera, type Point } from '../tabletop/geometry'
 const props = defineProps<{ scene: Scene; tokens: Token[]; objects: SceneObject[]; layer: Layer; userId: string; master: boolean; tool: Tool; selected: string; locked: boolean }>()
-const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point] }>()
+const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point]; resize:[id:string,rect:Rect] }>()
 const host = ref<HTMLDivElement>(), failure = ref(''), backgroundError = ref(''), backgroundLoading = ref(false)
 let backgroundTexture: Texture | undefined, backgroundAbort: AbortController | undefined, backgroundVersion = 0
 let app: Application | undefined, world: Container, observer: ResizeObserver | undefined, disposed = false
@@ -54,20 +54,19 @@ function paint() {
   function drawTokens(layer:Layer){
   for (const token of props.tokens.filter(token=>token.layer===layer)) {
     const point = drag?.mode === 'token' && drag.token?.id === token.id && drag.position ? drag.position : token
-    const item = new Container(); item.position.set(point.x, point.y)
-    const radius = cell * 0.4
-    if (props.selected === token.id) item.addChild(new Graphics().circle(0, 0, radius + 6).stroke({ color: 0xe0caff, width: 3 }))
-    item.addChild(new Graphics().circle(2, 4, radius + 1).fill({ color: 0x000000, alpha: 0.4 }))
-    item.addChild(new Graphics().circle(0, 0, radius).fill(token.color).stroke({ color: 0xe7d7ff, width: 2 }))
     const texture=token.token_url?tokenTextures.get(token.token_url):undefined
+    const rect=manipulation?.id===`token:${token.id}`?manipulation.preview:tokenBounds({...token,...point},cell,texture)
+    const item = new Container(); item.position.set(rect.x+rect.width/2,rect.y+rect.height/2)
     if(texture){
-      const image=new Sprite(texture);image.anchor.set(0.5);image.scale.set(Math.min(radius*2/texture.width,radius*2/texture.height));item.addChild(image)
+      const image=new Sprite(texture);image.anchor.set(0.5);image.width=rect.width;image.height=rect.height;item.addChild(image)
     }else{
-      const initials = new Text({ text: token.name.split(/\s+/).map(s => s[0]).slice(0, 2).join('').toUpperCase(), style: { fontFamily: 'Arial', fontSize: cell * 0.28, fill: '#ffffff', fontWeight: 'bold' } })
+      item.addChild(new Graphics().ellipse(0,0,rect.width/2,rect.height/2).fill(0x302538).stroke({color:0xe7d7ff,width:1/camera.scale}))
+      const initials = new Text({ text: token.name.split(/\s+/).map(s => s[0]).slice(0, 2).join('').toUpperCase(), style: { fontFamily: 'Arial', fontSize: Math.min(rect.width,rect.height)*0.35, fill: '#ffffff', fontWeight: 'bold' } })
       initials.anchor.set(0.5); item.addChild(initials)
     }
-    const label = new Text({ text: token.name, style: { fontFamily: 'Arial', fontSize: 13, fill: '#f1e8ff', stroke: { color: '#17131e', width: 4 } } })
-    label.anchor.set(0.5, 0); label.scale.set(1 / camera.scale); label.y = radius + 8 / camera.scale; item.addChild(label); item.alpha=layer==='mestre' && props.layer!=='mestre'?0.5:1;world.addChild(item)
+    if(props.selected===token.id)item.addChild(new Graphics().rect(-rect.width/2,-rect.height/2,rect.width,rect.height).stroke({color:0xe0caff,width:2/camera.scale}))
+    const label = new Text({ text: token.name, style: { fontFamily: 'Arial', fontSize: 13, fill: token.color, stroke: { color: '#17131e', width: 4 } } })
+    label.anchor.set(0.5, 0); label.scale.set(1 / camera.scale); label.y = rect.height/2 + 8 / camera.scale; item.addChild(label); item.alpha=layer==='mestre' && props.layer!=='mestre'?0.5:1;world.addChild(item)
   }
   }
   drawObjects('fundo');drawTokens('fundo')
@@ -127,24 +126,31 @@ watch(()=>props.objects.map(object=>object.id+object.image_url).join('|'),loadOb
 const contains=(p:Point,r:Rect)=>imageContains(r,p)
 function selectedImage(){
   if(!props.master||props.tool!=='select')return
-  if(props.selected==='background'&&props.layer==='fundo'){const rect=backgroundBounds();if(rect)return {id:'background',rect}}
+  const token=props.tokens.find(t=>t.id===props.selected&&t.layer===props.layer)
+  if(token)return {id:`token:${token.id}`,rect:tokenBounds(token,props.scene.cell_size,token.token_url?tokenTextures.get(token.token_url):undefined),kind:'token' as const}
+  if(props.selected==='background'&&props.layer==='fundo'){const rect=backgroundBounds();if(rect)return {id:'background',rect,kind:'image' as const}}
   const object=props.objects.find(o=>`object:${o.id}`===props.selected&&o.layer===props.layer)
-  if(object)return {id:object.id,rect:object}
+  if(object)return {id:object.id,rect:object,kind:'image' as const}
 }
-function handles(rect:Rect){return [[0,0],[rect.width,0],[rect.width,rect.height],[0,rect.height],[rect.width/2,-30/camera.scale]].map(([x,y])=>imagePoint(rect,x!,y!))}
+function handles(rect:Rect,rotate=true){return [[0,0],[rect.width,0],[rect.width,rect.height],[0,rect.height],...(rotate?[[rect.width/2,-30/camera.scale]]:[])].map(([x,y])=>imagePoint(rect,x!,y!))}
 function drawHandles(){
   const selected=selectedImage();if(!selected)return
   const rect=manipulation?.preview||(drag?.rect?{...drag.rect,...drag.position}:selected.rect)
-  const points=handles(rect),g=new Graphics(),size=5/camera.scale
+  const points=handles(rect,selected.kind!=='token'),g=new Graphics(),size=(selected.kind==='token'?3:5)/camera.scale
   g.poly(points.slice(0,4).flatMap(p=>[p.x,p.y])).closePath().stroke({color:0xd6b0ff,width:2/camera.scale})
-  const top=imagePoint(rect,rect.width/2,0)
-  g.moveTo(top.x,top.y).lineTo(points[4]!.x,points[4]!.y).stroke({color:0xd6b0ff,width:2/camera.scale})
+  if(points[4]){const top=imagePoint(rect,rect.width/2,0);g.moveTo(top.x,top.y).lineTo(points[4].x,points[4].y).stroke({color:0xd6b0ff,width:2/camera.scale})}
   points.forEach((p,i)=>{if(i===4)g.circle(p.x,p.y,size+1/camera.scale);else g.rect(p.x-size,p.y-size,size*2,size*2);g.fill(0xffffff).stroke({color:0x8052ae,width:1/camera.scale})})
   world.addChild(g)
+}
+function hitToken(at:Point){return [...props.tokens].reverse().find(token=>token.layer===props.layer&&contains(at,tokenBounds(token,props.scene.cell_size,token.token_url?tokenTextures.get(token.token_url):undefined)))}
+function handleAt(selected:NonNullable<ReturnType<typeof selectedImage>>,at:Point){
+  const radius=selected.kind==='token'?Math.min(10,Math.max(3,Math.min(selected.rect.width,selected.rect.height)*camera.scale/3)):11
+  return handles(selected.rect,selected.kind!=='token').findIndex(p=>Math.hypot(p.x-at.x,p.y-at.y)<=radius/camera.scale)
 }
 function doubleClick(event:MouseEvent){
   if(!props.master||props.tool!=='select'||props.locked)return
   const at=toWorld(point(event),camera)
+  if(hitToken(at))return
   const object=[...props.objects].reverse().find(object=>object.layer===props.layer&&contains(at,object))
   if(object){emit('edit',object.id,{x:object.x,y:object.y,width:object.width,height:object.height,rotation:object.rotation??0});return}
   const rect=backgroundBounds();if(props.layer==='fundo'&&rect&&contains(at,rect))emit('edit','background',rect)
@@ -190,13 +196,13 @@ function down(event: PointerEvent) {
   const screen = point(event), at = toWorld(screen, camera)
   const selected=selectedImage()
   if(selected&&!props.locked&&event.button===0){
-    const handle=handles(selected.rect).findIndex(p=>Math.hypot(p.x-at.x,p.y-at.y)<=11/camera.scale)
+    const handle=handleAt(selected,at)
     if(handle>=0){manipulation={pointer:event.pointerId,id:selected.id,rect:{...selected.rect},preview:{...selected.rect},handle,at,startAngle:Math.atan2(at.y-selected.rect.y-selected.rect.height/2,at.x-selected.rect.x-selected.rect.width/2)};return}
   }
   if (props.tool === 'measure' && event.button === 0) {
     ruler = { start: at, end: at }; drag = { pointer: event.pointerId, mode: 'measure', start: at, camera: { ...camera } }
   } else {
-    const hit = props.tool === 'select' && event.button === 0 ? [...props.tokens].reverse().filter(t=>t.layer===props.layer).find(t => Math.hypot(at.x - t.x, at.y - t.y) <= props.scene.cell_size * 0.45) : undefined
+    const hit = props.tool === 'select' && event.button === 0 ? hitToken(at) : undefined
     if (hit) {
       emit('select', hit.id)
       if (!props.locked && canMove(hit)) drag = { pointer: event.pointerId, mode: 'token', token: hit, start: at, offset: { x: at.x - hit.x, y: at.y - hit.y }, camera: { ...camera }, position: { x: hit.x, y: hit.y } }
@@ -215,7 +221,7 @@ function down(event: PointerEvent) {
 function move(event: PointerEvent) {
   if(host.value&&!drag&&!manipulation){
     const selected=selectedImage(),at=toWorld(point(event),camera)
-    const handle=selected&&!props.locked?handles(selected.rect).findIndex(p=>Math.hypot(p.x-at.x,p.y-at.y)<=11/camera.scale):-1
+    const handle=selected&&!props.locked?handleAt(selected,at):-1
     host.value.style.cursor=handle===4?'grab':handle>=0?'crosshair':''
   }
   if(manipulation){
@@ -228,7 +234,7 @@ function move(event: PointerEvent) {
   if (drag.mode === 'pan') { camera.x = drag.camera.x + at.x - drag.start.x; camera.y = drag.camera.y + at.y - drag.start.y }
   if (drag.mode === 'measure') ruler = { start: drag.start, end: toWorld(at, camera) }
   if(drag.mode==='object'||drag.mode==='background'){const atWorld=toWorld(at,camera);drag.position={x:Math.max(0,Math.min(props.scene.width-drag.rect!.width,atWorld.x-drag.offset!.x)),y:Math.max(0,Math.min(props.scene.height-drag.rect!.height,atWorld.y-drag.offset!.y))}}
-  if (drag.mode === 'token') { const worldPoint = toWorld(at, camera); drag.position = tokenPosition({ x: worldPoint.x - drag.offset!.x, y: worldPoint.y - drag.offset!.y }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height, props.scene.grid_type) }
+  if (drag.mode === 'token') { const worldPoint = toWorld(at, camera); drag.position = tokenPosition({ x: worldPoint.x - drag.offset!.x, y: worldPoint.y - drag.offset!.y }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height, props.scene.grid_type,drag.token) }
   paint()
 }
 function updateManipulation(free:boolean){
@@ -239,7 +245,7 @@ function updateManipulation(free:boolean){
   paint()
 }
 function up(event: PointerEvent) {
-  if(manipulation){if(manipulation.pointer!==event.pointerId)return;const m=manipulation;manipulation=undefined;if(host.value?.hasPointerCapture(event.pointerId))host.value.releasePointerCapture(event.pointerId);if(event.type!=='pointercancel')emit('transform',m.id,m.preview);paint();return}
+  if(manipulation){if(manipulation.pointer!==event.pointerId)return;const m=manipulation;manipulation=undefined;if(host.value?.hasPointerCapture(event.pointerId))host.value.releasePointerCapture(event.pointerId);if(event.type!=='pointercancel'){if(m.id.startsWith('token:'))emit('resize',m.id.slice(6),m.preview);else emit('transform',m.id,m.preview)};paint();return}
   if (!drag || drag.pointer !== event.pointerId) return
   const finished = drag; drag = undefined
   if (host.value?.hasPointerCapture(event.pointerId)) host.value.releasePointerCapture(event.pointerId)
@@ -271,7 +277,7 @@ function keyboard(event: KeyboardEvent) {
   const directions: Record<string, Point> = { ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 }, ArrowUp: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 } }
   const direction = directions[event.key]
   if (!token || token.layer!==props.layer || !direction || !canMove(token) || props.locked) return
-  event.preventDefault(); emit('move', token.id, tokenPosition({ x: token.x + direction.x * props.scene.cell_size, y: token.y + direction.y * props.scene.cell_size }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height, props.scene.grid_type))
+  event.preventDefault(); emit('move', token.id, tokenPosition({ x: token.x + direction.x * props.scene.cell_size, y: token.y + direction.y * props.scene.cell_size }, props.scene.cell_size, props.scene.snap, props.scene.width, props.scene.height, props.scene.grid_type,token))
 }
 // Recreate the render tree when changing grid topology. Keep camera and loaded
 // textures, but discard the previous shape's graphics and mask/render state.

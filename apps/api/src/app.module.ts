@@ -176,7 +176,7 @@ class ApiController {
     const access = await this.tableAccess(id, req)
     const [sceneList, tokens, messages, members, objects, folders, characters] = await Promise.all([
       this.db.pool.query('SELECT * FROM tabletop_scenes WHERE campaign_id=$1 AND ($2::boolean OR id=$3) ORDER BY created_at,id', [id, access.master, access.scene.id]),
-      this.db.pool.query("SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.layer,c.token_file FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND t.scene_id=$2 AND ($3::boolean OR t.layer<>'mestre') ORDER BY t.created_at,t.id", [id,access.scene.id,access.master]),
+      this.db.pool.query("SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.width,t.height,t.layer,c.token_file FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND t.scene_id=$2 AND ($3::boolean OR t.layer<>'mestre') ORDER BY t.created_at,t.id", [id,access.scene.id,access.master]),
       this.db.pool.query(`SELECT * FROM (SELECT m.id::text,m.content,m.roll,m.created_at,u.name AS author,u.id AS user_id FROM tabletop_messages m
         JOIN users u ON u.id=m.user_id WHERE m.campaign_id=$1 ORDER BY m.id DESC LIMIT 100) latest ORDER BY created_at,id::bigint`, [id]),
       this.db.pool.query(`SELECT u.id,u.name,CASE WHEN u.id=$2 THEN 'mestre' ELSE 'jogador' END AS role FROM users u
@@ -397,11 +397,24 @@ class ApiController {
     const coords = position(body.x, body.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type)
     return (await this.db.pool.query('INSERT INTO tabletop_tokens(id,campaign_id,owner_id,name,color,x,y,scene_id,layer) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *', [randomUUID(), id, owner, name, color, coords.x, coords.y, access.scene.id, targetLayer])).rows[0]
   }
+  @Post('campaigns/:id/tabletop/tokens/:tokenId/resize') async resizeToken(@Param('id') id:string,@Param('tokenId') tokenId:string,@Body() body:Record<string,unknown>,@Req() req:Request){
+    this.accounts.mutation(req);const access=await this.tableAccess(id,req)
+    if(!access.master)throw new ForbiddenException('Somente o mestre pode redimensionar tokens.')
+    if(!uuid.test(tokenId))throw new BadRequestException('Token inválido.')
+    const rect=bounds(body,access.scene)
+    try{
+      const result=await this.db.pool.query('UPDATE tabletop_tokens SET x=$1,y=$2,width=$3,height=$4 WHERE id=$5 AND campaign_id=$6 AND scene_id=$7 RETURNING *',[rect.x+rect.width/2,rect.y+rect.height/2,rect.width,rect.height,tokenId,id,access.scene.id])
+      if(!result.rowCount)throw new NotFoundException('Token não encontrado neste cenário.')
+      return result.rows[0]
+    }catch(error){sceneError(error)}
+  }
   @Post('campaigns/:id/tabletop/tokens/:tokenId/move') async moveToken(@Param('id') id: string, @Param('tokenId') tokenId: string, @Body() body: Record<string, unknown>, @Req() req: Request) {
     this.accounts.mutation(req)
     const access = await this.tableAccess(id, req)
     if (!uuid.test(tokenId)) throw new BadRequestException('Token inválido.')
-    const coords = position(body?.x, body?.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type)
+    const current=await this.db.pool.query("SELECT width,height FROM tabletop_tokens WHERE id=$1 AND campaign_id=$2 AND scene_id=$3 AND ($4::boolean OR (owner_id=$5 AND layer='geral'))",[tokenId,id,access.scene.id,access.master,access.user.id])
+    if(!current.rowCount)throw new ForbiddenException('Você não pode mover este token.')
+    const coords = position(body?.x, body?.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type,current.rows[0])
     const result = await this.db.pool.query(`UPDATE tabletop_tokens SET x=$1,y=$2 WHERE id=$3 AND campaign_id=$4 AND ($5::boolean OR (owner_id=$6 AND layer='geral')) AND scene_id=$7 RETURNING *`, [coords.x, coords.y, tokenId, id, access.master, access.user.id, access.scene.id])
     if (!result.rowCount) throw new ForbiddenException('Você não pode mover este token.')
     return result.rows[0]

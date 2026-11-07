@@ -188,13 +188,20 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
       await client.query(`
         ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS width integer NOT NULL DEFAULT 3200 CHECK(width BETWEEN 128 AND 16384);
         ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS height integer NOT NULL DEFAULT 2200 CHECK(height BETWEEN 128 AND 16384);
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS width double precision CHECK(width BETWEEN 8 AND 16384);
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS height double precision CHECK(height BETWEEN 8 AND 16384);
+        DO $$ BEGIN
+          IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='tabletop_token_dimensions_pair') THEN
+            ALTER TABLE tabletop_tokens ADD CONSTRAINT tabletop_token_dimensions_pair CHECK((width IS NULL)=(height IS NULL));
+          END IF;
+        END $$;
         ALTER TABLE tabletop_tokens DROP CONSTRAINT IF EXISTS tabletop_tokens_x_check;
         ALTER TABLE tabletop_tokens DROP CONSTRAINT IF EXISTS tabletop_tokens_y_check;
         CREATE OR REPLACE FUNCTION check_tabletop_item_bounds() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE scene record; BEGIN
           SELECT width,height INTO scene FROM tabletop_scenes WHERE id=NEW.scene_id FOR SHARE;
           IF TG_TABLE_NAME='tabletop_tokens' THEN
-            IF NEW.x<0 OR NEW.y<0 OR NEW.x>scene.width OR NEW.y>scene.height THEN
+            IF NEW.x<0 OR NEW.y<0 OR NEW.x>scene.width OR NEW.y>scene.height OR (NEW.width IS NOT NULL AND (NEW.x-NEW.width/2<0 OR NEW.y-NEW.height/2<0 OR NEW.x+NEW.width/2>scene.width OR NEW.y+NEW.height/2>scene.height)) THEN
               RAISE EXCEPTION 'Token fora do cenário' USING ERRCODE='23514';
             END IF;
           ELSE
@@ -213,7 +220,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
           SELECT * INTO scene FROM tabletop_scenes WHERE id=NEW.id;
           IF NOT FOUND THEN RETURN NULL; END IF;
           rect:=scene.background_transform;
-          IF EXISTS(SELECT 1 FROM tabletop_tokens WHERE scene_id=scene.id AND (x<0 OR y<0 OR x>scene.width OR y>scene.height))
+          IF EXISTS(SELECT 1 FROM tabletop_tokens WHERE scene_id=scene.id AND (x<0 OR y<0 OR x>scene.width OR y>scene.height OR (width IS NOT NULL AND (x-width/2<0 OR y-height/2<0 OR x+width/2>scene.width OR y+height/2>scene.height))))
             OR EXISTS(SELECT 1 FROM tabletop_objects WHERE scene_id=scene.id AND (x<0 OR y<0 OR x+width>scene.width OR y+height>scene.height))
             OR (rect IS NOT NULL AND ((rect->>'x')::float<0 OR (rect->>'y')::float<0 OR (rect->>'width')::float<8 OR (rect->>'height')::float<8
               OR (rect->>'x')::float+(rect->>'width')::float>scene.width OR (rect->>'y')::float+(rect->>'height')::float>scene.height)) THEN
