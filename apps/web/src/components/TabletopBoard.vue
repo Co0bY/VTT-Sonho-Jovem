@@ -2,7 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { Application, Container, Graphics, Text, Texture, Sprite } from 'pixi.js'
 import type { Scene, Token, Tool, Layer, SceneObject, Rect } from '../tabletop/types'
-import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance, type Camera, type Point } from '../tabletop/geometry'
+import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, measureRuler, type Camera, type Point } from '../tabletop/geometry'
 const props = defineProps<{ scene: Scene; tokens: Token[]; objects: SceneObject[]; layer: Layer; userId: string; master: boolean; tool: Tool; selected: string; locked: boolean }>()
 const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point]; resize:[id:string,rect:Rect]; rotate:[id:string,rotation:number,free:boolean] }>()
 const host = ref<HTMLDivElement>(), failure = ref(''), backgroundError = ref(''), backgroundLoading = ref(false)
@@ -15,7 +15,7 @@ let objectAbort: AbortController | undefined, objectVersion=0
 let camera: Camera = { x: 0, y: 0, scale: 0.6 }
 let drag: { pointer: number; mode: 'token' | 'pan' | 'measure' | 'object' | 'background'; start: Point; camera: Camera; token?: Token; object?: SceneObject; rect?:Rect; offset?: Point; position?: Point; size?:{width:number;height:number}; moved?:boolean } | undefined
 let manipulation: {pointer:number;id:string;rect:Rect;preview:Rect;handle:number;free:boolean;at:Point;startAngle:number} | undefined
-let ruler: { start: Point; end: Point } | undefined
+let ruler: { start: Point; end: Point; value: number } | undefined
 const canMove = (t: Token) => props.master || (t.layer === 'geral' && t.owner_id === props.userId)
 function clear(container=world) {
   const children=container.removeChildren()
@@ -87,7 +87,7 @@ function paint() {
   drawHandles()
   if (ruler) {
     world.addChild(new Graphics().moveTo(ruler.start.x, ruler.start.y).lineTo(ruler.end.x, ruler.end.y).stroke({ color: 0xe5be75, width: 3 / camera.scale }).circle(ruler.start.x, ruler.start.y, 4 / camera.scale).fill(0xe5be75).circle(ruler.end.x, ruler.end.y, 4 / camera.scale).fill(0xe5be75))
-    const text = new Text({ text: `${distance(ruler.start, ruler.end, cell, props.scene.distance_per_cell).toLocaleString('pt-BR', {maximumFractionDigits: 6})} ${props.scene.distance_unit}`, style: { fontFamily: 'Arial', fontSize: 15, fill: '#ffe0a1', stroke: { color: '#17131e', width: 5 } } })
+    const text = new Text({ text: `${ruler.value.toLocaleString('pt-BR', {maximumFractionDigits: 6})} ${props.scene.distance_unit}`, style: { fontFamily: 'Arial', fontSize: 15, fill: '#ffe0a1', stroke: { color: '#17131e', width: 5 } } })
     text.scale.set(1 / camera.scale);text.position.set(ruler.end.x + 12 / camera.scale, ruler.end.y - 25 / camera.scale); world.addChild(text)
   }
   app.render()
@@ -190,18 +190,22 @@ function dropCharacter(event:DragEvent){
   if(at.x<0||at.y<0||at.x>props.scene.width||at.y>props.scene.height)return
   emit('place',id,tokenPosition(at,props.scene.cell_size,props.scene.snap,props.scene.width,props.scene.height,props.scene.grid_type))
 }
+function updateRuler(start: Point, end: Point, free: boolean) {
+  const scene = props.scene
+  ruler = measureRuler(start, end, scene.cell_size, scene.distance_per_cell, scene.grid_type, scene.width, scene.height, free)
+}
 function down(event: PointerEvent) {
   if (drag || manipulation || !app || !host.value) return
   if (![0, 1, 2].includes(event.button)) return
   event.preventDefault(); host.value.focus(); host.value.setPointerCapture(event.pointerId)
   const screen = point(event), at = toWorld(screen, camera)
   const selected=selectedImage()
-  if(selected&&!props.locked&&event.button===0){
+  if(selected&&props.tool==='select'&&!props.locked&&event.button===0){
     const handle=handleAt(selected,at)
     if(handle>=0){manipulation={pointer:event.pointerId,id:selected.id,rect:{...selected.rect},preview:{...selected.rect},handle,free:event.altKey,at,startAngle:Math.atan2(at.y-selected.rect.y-selected.rect.height/2,at.x-selected.rect.x-selected.rect.width/2)};return}
   }
   if (props.tool === 'measure' && event.button === 0) {
-    ruler = { start: at, end: at }; drag = { pointer: event.pointerId, mode: 'measure', start: at, camera: { ...camera } }
+    updateRuler(at, at, event.altKey); drag = { pointer: event.pointerId, mode: 'measure', start: at, camera: { ...camera } }
   } else {
     const hit = props.tool === 'select' && event.button === 0 ? hitToken(at) : undefined
     if (hit) {
@@ -233,7 +237,7 @@ function move(event: PointerEvent) {
   if (!drag || drag.pointer !== event.pointerId) return
   const at = point(event)
   if (drag.mode === 'pan') { camera.x = drag.camera.x + at.x - drag.start.x; camera.y = drag.camera.y + at.y - drag.start.y }
-  if (drag.mode === 'measure') ruler = { start: drag.start, end: toWorld(at, camera) }
+  if (drag.mode === 'measure') { drag.position = toWorld(at, camera); updateRuler(drag.start, drag.position, event.altKey) }
   if(drag.mode==='object'||drag.mode==='background'){const atWorld=toWorld(at,camera);drag.position={x:Math.max(0,Math.min(props.scene.width-drag.rect!.width,atWorld.x-drag.offset!.x)),y:Math.max(0,Math.min(props.scene.height-drag.rect!.height,atWorld.y-drag.offset!.y))}}
   if (drag.mode === 'token') {
     const worldPoint = toWorld(at, camera),token=drag.token!
@@ -253,6 +257,7 @@ function updateManipulation(free:boolean){
 function up(event: PointerEvent) {
   if(manipulation){if(manipulation.pointer!==event.pointerId)return;const m=manipulation;manipulation=undefined;if(host.value?.hasPointerCapture(event.pointerId))host.value.releasePointerCapture(event.pointerId);if(event.type!=='pointercancel'){if(m.id.startsWith('token:')){if(m.handle===4)emit('rotate',m.id.slice(6),m.preview.rotation??0,m.free);else emit('resize',m.id.slice(6),m.preview)}else emit('transform',m.id,m.preview)};paint();return}
   if (!drag || drag.pointer !== event.pointerId) return
+  if(drag.mode==='measure')ruler=undefined
   const finished = drag; drag = undefined
   if (host.value?.hasPointerCapture(event.pointerId)) host.value.releasePointerCapture(event.pointerId)
   if (event.type !== 'pointercancel' && finished.mode === 'token' && finished.position && (finished.position.x!==finished.token!.x || finished.position.y!==finished.token!.y || (finished.moved&&finished.size&&(finished.size.width!==finished.token!.width||finished.size.height!==finished.token!.height)))) emit('move', finished.token!.id, finished.position)
@@ -269,6 +274,7 @@ function center() {
 }
 function keyboard(event: KeyboardEvent) {
   if((event.target as HTMLElement).closest('input,textarea,select,[contenteditable="true"]'))return
+  if(event.key==='Alt'&&drag?.mode==='measure'){event.preventDefault();updateRuler(drag.start,drag.position??drag.start,event.altKey);paint();return}
   if(event.key==='Alt'&&manipulation){event.preventDefault();updateManipulation(event.altKey);return}
   if(event.type==='keyup')return
   if(event.key==='Delete'){

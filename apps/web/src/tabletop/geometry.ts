@@ -96,3 +96,19 @@ export function rotationAngle(angle:number,free=false){
   const rotation=free?angle:Math.round(angle/15)*15
   return ((rotation%360)+360)%360
 }
+
+// Grid measurements count cell steps; Alt (or no grid) uses Euclidean distance.
+export function measureRuler(start: Point, end: Point, cell: number, perCell: number, gridType: string, width: number, height: number, free = false) {
+  if (free || gridType === 'none') return { start, end, value: distance(start, end, cell, perCell) }
+  const a = tokenPosition(start, cell, true, width, height, gridType)
+  const b = tokenPosition(end, cell, true, width, height, gridType)
+  let steps: number
+  if (gridType === 'hex') {
+    const dy = (b.y - a.y) / (cell * Math.sqrt(3) / 2)
+    const dx = (b.x - a.x) / cell - dy / 2
+    steps = Math.round(Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dx + dy)))
+  } else {
+    steps = Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / cell)
+  }
+  return { start: a, end: b, value: steps * perCell }
+}

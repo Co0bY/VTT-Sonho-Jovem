@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, hexPosition, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance } from '../src/tabletop/geometry.ts'
+import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, hexPosition, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance, measureRuler } from '../src/tabletop/geometry.ts'
 test('zoom preserves world point beneath cursor and clamps zoom', () => {
   const camera = {x:100,y:-50,scale:0.8}, cursor={x:333,y:222}
   const before = toWorld(cursor,camera)
@@ -128,4 +128,20 @@ test('rotation snaps every 15 degrees unless Alt enables free rotation',()=>{
   for(const [angle,expected] of [[7,0],[8,15],[23,30],[44,45],[359,0],[-17,345],[721,0]])assert.equal(rotationAngle(angle),expected)
   assert.ok(Math.abs(rotationAngle(23.4,true)-23.4)<1e-8)
   assert.ok(Math.abs(rotationAngle(-17.2,true)-342.8)<1e-8)
+})
+
+test('ruler snaps both ends and counts square steps using scene scale', () => {
+  const measure = (a,b,free=false) => measureRuler(a,b,64,1.5,'square',640,640,free)
+  assert.deepEqual(measure({x:2,y:20},{x:150,y:90}), {start:{x:32,y:32},end:{x:160,y:96},value:3})
+  assert.equal(measure({x:1,y:1},{x:63,y:63}).value,0)
+  assert.equal(measure({x:32,y:32},{x:96,y:96}).value,1.5)
+  assert.equal(measureRuler({x:32,y:32},{x:160,y:32},64,5,'square',640,640).value,10)
+  const a={x:2,y:20},b={x:150,y:90}
+  assert.deepEqual(measure(a,b,true),{start:a,end:b,value:distance(a,b,64,1.5)})
+  assert.deepEqual(measureRuler(a,b,64,1.5,'none',640,640),measure(a,b,true))
+})
+test('hex ruler counts adjacent centers and reverse paths consistently', () => {
+  const a={x:32,y:64/Math.sqrt(3)},b={x:64,y:a.y+64*Math.sqrt(3)/2}
+  assert.equal(measureRuler(a,b,64,1.5,'hex',640,640).value,1.5)
+  assert.equal(measureRuler(b,a,64,1.5,'hex',640,640).value,1.5)
 })
