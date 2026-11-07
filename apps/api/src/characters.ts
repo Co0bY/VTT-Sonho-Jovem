@@ -8,7 +8,7 @@ import { minimumTokenSize } from './grid'
 import { position } from './tabletop-rules'
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-export type CharacterRow={id:string;campaign_id:string;owner_id:string;name:string;color:string;appearance_file:string|null;token_file:string|null}
+export type CharacterRow={id:string;campaign_id:string;owner_id:string;name:string;color:string;description:string;notes:string;appearance_file:string|null;token_file:string|null}
 export type CharacterContext={campaign:{id:string;owner_id:string};user:{id:string};master:boolean;scene:{id:string;cell_size:number;snap:boolean;width:number;height:number;grid_type:string}}
 export type CharacterFiles={appearance?:Express.Multer.File[];token?:Express.Multer.File[]}
 
@@ -18,7 +18,7 @@ export class Characters {
 
   present(character:CharacterRow){
     const image=(kind:string,file:string|null)=>file?`/api/campaigns/${character.campaign_id}/tabletop/characters/${character.id}/images/${kind}/${file}`:null
-    return {id:character.id,owner_id:character.owner_id,name:character.name,color:character.color,appearance_url:image('appearance',character.appearance_file),token_url:image('token',character.token_file)}
+    return {id:character.id,owner_id:character.owner_id,name:character.name,color:character.color,description:character.description,notes:character.notes,appearance_url:image('appearance',character.appearance_file),token_url:image('token',character.token_file)}
   }
 
   async find(campaign:string,id:string):Promise<CharacterRow>{
@@ -31,6 +31,10 @@ export class Characters {
   async save(access:CharacterContext,id:string|undefined,body:Record<string,unknown>,files:CharacterFiles={}){
     if(!access.master)throw new ForbiddenException('Somente o mestre pode criar ou editar personagens.')
     const text=(key:string,max:number)=>{const value=body[key];if(typeof value!=='string'||!value.trim()||value.trim().length>max)throw new BadRequestException(`Campo ${key} inválido.`);return value.trim()}
+    for(const key of ['description','notes']){
+      if(typeof body[key]==='string')body[key]=(body[key] as string).replace(/\r\n?/g,'\n')
+      if(body[key]!==undefined&&(typeof body[key]!=='string'||(body[key] as string).length>20000))throw new BadRequestException(`Campo ${key} inválido: use até 20000 caracteres.`)
+    }
     const name=text('name',40),owner=text('owner_id',36),color=text('color',7)
     if(!uuid.test(owner)||!/^#[0-9a-f]{6}$/i.test(color))throw new BadRequestException('Cor ou participante inválido.')
     const member=await this.db.pool.query('SELECT id FROM users WHERE id=$1 AND (id=$2 OR EXISTS(SELECT 1 FROM campaign_members WHERE campaign_id=$3 AND user_id=$1))',[owner,access.campaign.owner_id,access.campaign.id])
@@ -50,14 +54,15 @@ export class Characters {
       if(id){previous=(await client.query('SELECT * FROM tabletop_characters WHERE id=$1 AND campaign_id=$2 FOR UPDATE',[id,access.campaign.id])).rows[0];if(!previous)throw new NotFoundException('Personagem não encontrado.')}
       const appearance=saved.find(file=>file.category==='outros')?.name??(String(body.remove_appearance)==='true'?null:previous?.appearance_file??null)
       const token=saved.find(file=>file.category==='tokens')?.name??(String(body.remove_token)==='true'?null:previous?.token_file??null)
+      const description=body.description??previous?.description??'',notes=body.notes??previous?.notes??''
       let character:CharacterRow
       if(previous){
-        character=(await client.query('UPDATE tabletop_characters SET name=$1,owner_id=$2,color=$3,appearance_file=$4,token_file=$5 WHERE id=$6 AND campaign_id=$7 RETURNING *',[name,owner,color,appearance,token,id,access.campaign.id])).rows[0]
+        character=(await client.query('UPDATE tabletop_characters SET name=$1,owner_id=$2,color=$3,appearance_file=$4,token_file=$5,description=$8,notes=$9 WHERE id=$6 AND campaign_id=$7 RETURNING *',[name,owner,color,appearance,token,id,access.campaign.id,description,notes])).rows[0]
         await client.query('UPDATE tabletop_tokens SET name=$1,owner_id=$2,color=$3 WHERE character_id=$4 AND campaign_id=$5',[name,owner,color,id,access.campaign.id])
         if(previous.appearance_file&&previous.appearance_file!==appearance)old.push({category:'outros',name:previous.appearance_file})
         if(previous.token_file&&previous.token_file!==token)old.push({category:'tokens',name:previous.token_file})
       }else{
-        character=(await client.query('INSERT INTO tabletop_characters(id,campaign_id,owner_id,name,color,appearance_file,token_file) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[randomUUID(),access.campaign.id,owner,name,color,appearance,token])).rows[0]
+        character=(await client.query('INSERT INTO tabletop_characters(id,campaign_id,owner_id,name,color,appearance_file,token_file,description,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',[randomUUID(),access.campaign.id,owner,name,color,appearance,token,description,notes])).rows[0]
       }
       await client.query('COMMIT')
       for(const file of old)await this.cleanup(access,file)

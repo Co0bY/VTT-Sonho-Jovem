@@ -261,6 +261,8 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
           created_at timestamptz NOT NULL DEFAULT now(),
           UNIQUE(id,campaign_id)
         );
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '' CHECK(length(description)<=20000);
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS notes text NOT NULL DEFAULT '' CHECK(length(notes)<=20000);
         CREATE INDEX IF NOT EXISTS tabletop_characters_campaign_idx ON tabletop_characters(campaign_id);
         ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS character_id uuid;
         INSERT INTO tabletop_characters(id,campaign_id,owner_id,name,color,created_at)
