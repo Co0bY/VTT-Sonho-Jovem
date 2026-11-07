@@ -101,3 +101,7 @@ Tokens selecionados agora têm alça circular para girar, com ângulo salvo por 
 ## Atualização — tamanho mínimo ao mover e giro em passos
 
 Ao colocar ou mover tokens menores que uma célula, a presença cresce proporcionalmente até o lado maior alcançar a célula; tokens maiores são preservados. Sem grid, não há esse ajuste. As alças de rotação agora usam passos de 15 graus, com Alt para giro livre, e a API aplica essa regra aos tokens. Consulte `26-tamanho-minimo-e-passos-de-rotacao.md` para exemplos e validações.
+
+## Atualização — régua por células
+
+A régua encaixa início e fim nos centros e conta passos conforme a escala do cenário, incluindo diagonais de um passo no grid quadrado. Alt libera ambas as pontas e a distância em linha reta; sem grid, a medição é livre. Consulte `28-regua-centro-do-grid.md` para decisões e validações.
