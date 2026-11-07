@@ -34,3 +34,7 @@ Na mesa, abra a edição de um personagem, formate a descrição e as anotaçõe
 - Ambiente Docker reconstruído com as novas dependências; API e interface saudáveis.
 
 Continuação na branch `feat/tokens-e-fichas-de-jogadores` e no PR #3, sem incluir as alterações locais anteriores de Docker, régua ou escala de tokens. Nenhum merge automático.
+
+## Título do pop-up
+
+O cabeçalho e o nome acessível da janela passam a usar o nome do personagem, sem repetir o nome abaixo das imagens. Isso vale para a leitura local e a apresentação aos jogadores. Seletores do teste de navegador foram ajustados ao novo título; checagem de tipos e verificação do diff aprovadas.
