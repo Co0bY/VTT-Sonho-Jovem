@@ -81,8 +81,8 @@ export function hexGridSegments(cell:number, width:number, height:number, view={
   return segments
 }
 
-export function tokenBounds(token:Point & {width:number|null;height:number|null}, cell:number, texture?:{width:number;height:number}): ImageRect {
+export function tokenBounds(token:Point & {width:number|null;height:number|null;rotation?:number}, cell:number, texture?:{width:number;height:number}): ImageRect {
   const scale=texture?Math.min(cell*0.8/texture.width,cell*0.8/texture.height):1
   const width=token.width??(texture?texture.width*scale:cell*0.8),height=token.height??(texture?texture.height*scale:cell*0.8)
-  return {x:token.x-width/2,y:token.y-height/2,width,height}
+  return {x:token.x-width/2,y:token.y-height/2,width,height,rotation:token.rotation??0}
 }

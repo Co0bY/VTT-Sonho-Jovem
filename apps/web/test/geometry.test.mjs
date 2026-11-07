@@ -96,12 +96,24 @@ test('hex grid edges have equal lengths and are not drawn twice',()=>{
 })
 
 test('token bounds preserve the image aspect until an explicit drag size is saved',()=>{
-  assert.deepEqual(tokenBounds({x:100,y:100,width:null,height:null},100,{width:40,height:80}),{x:80,y:60,width:40,height:80})
-  assert.deepEqual(tokenBounds({x:100,y:100,width:120,height:60},100,{width:40,height:80}),{x:40,y:70,width:120,height:60})
+  assert.deepEqual(tokenBounds({x:100,y:100,width:null,height:null},100,{width:40,height:80}),{x:80,y:60,width:40,height:80,rotation:0})
+  assert.deepEqual(tokenBounds({x:100,y:100,width:120,height:60},100,{width:40,height:80}),{x:40,y:70,width:120,height:60,rotation:0})
 })
 test('resized tokens stay completely inside the scene during movement',()=>{
   for(const grid of ['square','hex','none']){
     const point=tokenPosition({x:-100,y:9999},64,true,512,384,grid,{width:200,height:100})
     assert.ok(point.x>=100&&point.x<=412&&point.y>=50&&point.y<=334)
   }
+})
+
+test('token bounds preserve rotation for handles, hit testing and corner resizing',()=>{
+  const bounds=tokenBounds({x:200,y:200,width:120,height:40,rotation:90},64)
+  assert.equal(bounds.rotation,90)
+  assert.equal(imageContains(bounds,{x:200,y:250}),true)
+  assert.equal(imageContains(bounds,{x:250,y:200}),false)
+  const fixed=imagePoint(bounds,0,0),point=imagePoint(bounds,160,80)
+  const next=resizeImage(bounds,point,2,{proportional:false})
+  const after=imagePoint(next,0,0)
+  assert.equal(next.rotation,90)
+  assert.ok(Math.hypot(after.x-fixed.x,after.y-fixed.y)<1e-8)
 })

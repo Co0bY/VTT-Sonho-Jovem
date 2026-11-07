@@ -37,6 +37,16 @@ async function contextFor(token) {
   context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)))
   return context
 }
+async function screenshotHasColor(page,buffer,color){
+  return page.evaluate(async({bytes,color})=>{
+    const image=await createImageBitmap(new Blob([new Uint8Array(bytes)],{type:'image/png'}))
+    const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height
+    const context=canvas.getContext('2d');context.drawImage(image,0,0);image.close()
+    const pixels=context.getImageData(0,0,canvas.width,canvas.height).data
+    for(let i=0;i<pixels.length;i+=4)if(pixels[i]===color[0]&&pixels[i+1]===color[1]&&pixels[i+2]===color[2])return true
+    return false
+  },{bytes:[...buffer],color})
+}
 async function main() {
   storageRoot = await mkdtemp('/tmp/vtt-browser-storage-')
   const apiLogs=start(process.execPath,['dist/main.js'],{cwd:path.join(root,'apps/api'),env:{...process.env,PORT:'3104',STORAGE_ROOT:storageRoot,WEB_ORIGIN:'http://127.0.0.1:9014'}})
@@ -83,14 +93,7 @@ async function main() {
   const transparentPixel=await page.screenshot({clip:{...transparentPoint,width:1,height:1},animations:'disabled'})
   assert.ok(transparentPixel.equals(backgroundPixel),'Transparent PNG area must reveal the map rather than an identification-colored background')
   const labelShot=await page.screenshot({clip:{x:Math.round(testOrigin.x+1632*testScale)-55,y:Math.round(testOrigin.y+(1120+25.6)*testScale)+8,width:110,height:25},animations:'disabled'})
-  const usesIdentificationColor=await page.evaluate(async bytes=>{
-    const image=await createImageBitmap(new Blob([new Uint8Array(bytes)],{type:'image/png'}))
-    const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height
-    const context=canvas.getContext('2d');context.drawImage(image,0,0);image.close()
-    const pixels=context.getImageData(0,0,canvas.width,canvas.height).data
-    for(let i=0;i<pixels.length;i+=4)if(pixels[i]===164&&pixels[i+1]===122&&pixels[i+2]===226)return true
-    return false
-  },[...labelShot])
+  const usesIdentificationColor=await screenshotHasColor(page,labelShot,[164,122,226])
   assert.equal(usesIdentificationColor,true,'The token label must use the character identification color')
   async function resizeMapToken(width,height,free=false){
     await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
@@ -102,14 +105,29 @@ async function main() {
     await until(async()=>Math.abs((await snapshot()).tokens[0].width-width)<0.001)
     await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
   }
+  async function rotateMapToken(degrees){
+    await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
+    const token=(await snapshot()).tokens[0],angle=(token.rotation??0)*Math.PI/180,dist=(token.height??51.2)/2+30/testScale,target=degrees*Math.PI/180
+    await page.mouse.move(testOrigin.x+(token.x+Math.sin(angle)*dist)*testScale,testOrigin.y+(token.y-Math.cos(angle)*dist)*testScale)
+    await page.mouse.down();await page.mouse.move(testOrigin.x+(token.x+Math.sin(target)*dist)*testScale,testOrigin.y+(token.y-Math.cos(target)*dist)*testScale,{steps:8});await page.mouse.up()
+    await until(async()=>Math.abs((((await snapshot()).tokens[0].rotation-degrees+540)%360)-180)<0.01)
+    await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
+  }
   await resizeMapToken(128,128)
   assert.equal((await snapshot()).tokens[0].height,128)
   await resizeMapToken(150,90,true)
   assert.ok(Math.abs((await snapshot()).tokens[0].height-90)<0.001)
+  const beforeRotation=(await snapshot()).tokens[0]
+  await rotateMapToken(90)
+  assert.equal((await snapshot()).tokens[0].x,beforeRotation.x)
+  assert.equal((await snapshot()).tokens[0].width,beforeRotation.width)
+  await page.screenshot({path:path.join(root,'analise-arquivo/token-rotacionado.png'),fullPage:true,animations:'disabled'})
   await page.reload();await page.locator('.pixi-board canvas').waitFor()
   assert.ok(Math.abs((await snapshot()).tokens[0].width-150)<0.001)
+  assert.ok(Math.abs((await snapshot()).tokens[0].rotation-90)<0.01)
   const freeToken=(await snapshot()).tokens[0]
   await page.mouse.click(testOrigin.x+freeToken.x*testScale,testOrigin.y+freeToken.y*testScale)
+  await rotateMapToken(0)
   await resizeMapToken(51.2,51.2,true)
   const first = (await snapshot()).tokens[0]
   await page.mouse.dblclick(testOrigin.x+first.x*testScale,testOrigin.y+first.y*testScale)
@@ -367,12 +385,16 @@ async function main() {
   await page.getByLabel('Camada de edição',{exact:true}).selectOption('geral')
   await page.getByRole('button',{name:'Novo personagem',exact:true}).click()
   await page.getByLabel('Nome do personagem',{exact:true}).fill('Personagem sem imagens')
+  await page.getByLabel('Cor de identificação',{exact:true}).fill('#00bb66')
   await page.getByRole('button',{name:'Criar personagem',exact:true}).click()
   await until(async()=> (await snapshot()).characters.some(c=>c.name==='Personagem sem imagens'))
   assert.equal((await snapshot()).tokens.length,0)
   await page.getByRole('button',{name:'Adicionar Personagem sem imagens ao mapa',exact:true}).click()
   await until(async()=> (await snapshot()).tokens.length===1)
   await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
+  const fallback=(await snapshot()).tokens[0]
+  const fallbackShot=await page.screenshot({clip:{x:Math.round(origin.x+fallback.x*handleScale)-10,y:Math.round(origin.y+fallback.y*handleScale)-10,width:20,height:20},animations:'disabled'})
+  assert.equal(await screenshotHasColor(page,fallbackShot,[0,187,102]),true,'A token without an image must have its identification color behind the initial')
   await page.locator('.pixi-board').focus()
   await page.keyboard.press('Delete')
   await until(async()=> (await snapshot()).tokens.length===0)
@@ -388,7 +410,7 @@ async function main() {
   assert.equal(await page.locator('.character-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth),true)
   await page.getByRole('button',{name:'Cancelar',exact:true}).click()
   assert.deepEqual(errors,[])
-  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, alças de tokens com tamanho proporcional/Alt e persistência, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
+  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, alças de tokens com tamanho proporcional/Alt, rotação persistida e marcador colorido com inicial, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
   if(browser)await browser.close()

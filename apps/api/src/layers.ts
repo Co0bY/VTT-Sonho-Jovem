@@ -7,7 +7,9 @@ export function bounds(body: Record<string,unknown>,scene:{width:number;height:n
   if (values.some(n=>typeof n !== 'number' || !Number.isFinite(n))) throw new BadRequestException('Dimensões inválidas.')
   const [x,y,width,height] = values as number[]
   if(x<0||y<0||width<8||height<8||x+width>scene.width||y+height>scene.height) throw new BadRequestException('Mantenha a imagem dentro do cenário, com tamanho mínimo de 8 pixels.')
-  const rotation=body.rotation??0
-  if(typeof rotation!=='number'||!Number.isFinite(rotation))throw new BadRequestException('Ângulo inválido.')
-  return {x,y,width,height,rotation:((rotation%360)+360)%360}
+  return {x,y,width,height,rotation:normalizeRotation(body.rotation??0)}
+}
+export function normalizeRotation(value:unknown){
+  if(typeof value!=='number'||!Number.isFinite(value))throw new BadRequestException('Ângulo inválido.')
+  return ((value%360)+360)%360
 }

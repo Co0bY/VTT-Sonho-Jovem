@@ -4,7 +4,7 @@ import { Application, Container, Graphics, Text, Texture, Sprite } from 'pixi.js
 import type { Scene, Token, Tool, Layer, SceneObject, Rect } from '../tabletop/types'
 import { tokenBounds, hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance, type Camera, type Point } from '../tabletop/geometry'
 const props = defineProps<{ scene: Scene; tokens: Token[]; objects: SceneObject[]; layer: Layer; userId: string; master: boolean; tool: Tool; selected: string; locked: boolean }>()
-const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point]; resize:[id:string,rect:Rect] }>()
+const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point]; resize:[id:string,rect:Rect]; rotate:[id:string,rotation:number] }>()
 const host = ref<HTMLDivElement>(), failure = ref(''), backgroundError = ref(''), backgroundLoading = ref(false)
 let backgroundTexture: Texture | undefined, backgroundAbort: AbortController | undefined, backgroundVersion = 0
 let app: Application | undefined, world: Container, observer: ResizeObserver | undefined, disposed = false
@@ -57,16 +57,17 @@ function paint() {
     const texture=token.token_url?tokenTextures.get(token.token_url):undefined
     const rect=manipulation?.id===`token:${token.id}`?manipulation.preview:tokenBounds({...token,...point},cell,texture)
     const item = new Container(); item.position.set(rect.x+rect.width/2,rect.y+rect.height/2)
+    const visual=new Container();visual.angle=rect.rotation??0;item.addChild(visual)
     if(texture){
-      const image=new Sprite(texture);image.anchor.set(0.5);image.width=rect.width;image.height=rect.height;item.addChild(image)
+      const image=new Sprite(texture);image.anchor.set(0.5);image.width=rect.width;image.height=rect.height;visual.addChild(image)
     }else{
-      item.addChild(new Graphics().ellipse(0,0,rect.width/2,rect.height/2).fill(0x302538).stroke({color:0xe7d7ff,width:1/camera.scale}))
-      const initials = new Text({ text: token.name.split(/\s+/).map(s => s[0]).slice(0, 2).join('').toUpperCase(), style: { fontFamily: 'Arial', fontSize: Math.min(rect.width,rect.height)*0.35, fill: '#ffffff', fontWeight: 'bold' } })
-      initials.anchor.set(0.5); item.addChild(initials)
+      visual.addChild(new Graphics().ellipse(0,0,rect.width/2,rect.height/2).fill(token.token_url?0x302538:token.color).stroke({color:0xe7d7ff,width:1/camera.scale}))
+      const initials = new Text({ text: token.name.trim().slice(0,1).toUpperCase(), style: { fontFamily: 'Arial', fontSize: Math.min(rect.width,rect.height)*0.35, fill: '#ffffff', fontWeight: 'bold' } })
+      initials.anchor.set(0.5); visual.addChild(initials)
     }
-    if(props.selected===token.id)item.addChild(new Graphics().rect(-rect.width/2,-rect.height/2,rect.width,rect.height).stroke({color:0xe0caff,width:2/camera.scale}))
+    if(props.selected===token.id)visual.addChild(new Graphics().rect(-rect.width/2,-rect.height/2,rect.width,rect.height).stroke({color:0xe0caff,width:2/camera.scale}))
     const label = new Text({ text: token.name, style: { fontFamily: 'Arial', fontSize: 13, fill: token.color, stroke: { color: '#17131e', width: 4 } } })
-    label.anchor.set(0.5, 0); label.scale.set(1 / camera.scale); label.y = rect.height/2 + 8 / camera.scale; item.addChild(label); item.alpha=layer==='mestre' && props.layer!=='mestre'?0.5:1;world.addChild(item)
+    label.anchor.set(0.5, 0); label.scale.set(1 / camera.scale); label.y = (Math.abs(Math.sin((rect.rotation??0)*Math.PI/180))*rect.width+Math.abs(Math.cos((rect.rotation??0)*Math.PI/180))*rect.height)/2 + 8 / camera.scale; item.addChild(label); item.alpha=layer==='mestre' && props.layer!=='mestre'?0.5:1;world.addChild(item)
   }
   }
   drawObjects('fundo');drawTokens('fundo')
@@ -136,7 +137,7 @@ function handles(rect:Rect,rotate=true){return [[0,0],[rect.width,0],[rect.width
 function drawHandles(){
   const selected=selectedImage();if(!selected)return
   const rect=manipulation?.preview||(drag?.rect?{...drag.rect,...drag.position}:selected.rect)
-  const points=handles(rect,selected.kind!=='token'),g=new Graphics(),size=(selected.kind==='token'?3:5)/camera.scale
+  const points=handles(rect),g=new Graphics(),size=(selected.kind==='token'?3:5)/camera.scale
   g.poly(points.slice(0,4).flatMap(p=>[p.x,p.y])).closePath().stroke({color:0xd6b0ff,width:2/camera.scale})
   if(points[4]){const top=imagePoint(rect,rect.width/2,0);g.moveTo(top.x,top.y).lineTo(points[4].x,points[4].y).stroke({color:0xd6b0ff,width:2/camera.scale})}
   points.forEach((p,i)=>{if(i===4)g.circle(p.x,p.y,size+1/camera.scale);else g.rect(p.x-size,p.y-size,size*2,size*2);g.fill(0xffffff).stroke({color:0x8052ae,width:1/camera.scale})})
@@ -145,7 +146,7 @@ function drawHandles(){
 function hitToken(at:Point){return [...props.tokens].reverse().find(token=>token.layer===props.layer&&contains(at,tokenBounds(token,props.scene.cell_size,token.token_url?tokenTextures.get(token.token_url):undefined)))}
 function handleAt(selected:NonNullable<ReturnType<typeof selectedImage>>,at:Point){
   const radius=selected.kind==='token'?Math.min(10,Math.max(3,Math.min(selected.rect.width,selected.rect.height)*camera.scale/3)):11
-  return handles(selected.rect,selected.kind!=='token').findIndex(p=>Math.hypot(p.x-at.x,p.y-at.y)<=radius/camera.scale)
+  return handles(selected.rect).findIndex(p=>Math.hypot(p.x-at.x,p.y-at.y)<=radius/camera.scale)
 }
 function doubleClick(event:MouseEvent){
   if(!props.master||props.tool!=='select'||props.locked)return
@@ -245,7 +246,7 @@ function updateManipulation(free:boolean){
   paint()
 }
 function up(event: PointerEvent) {
-  if(manipulation){if(manipulation.pointer!==event.pointerId)return;const m=manipulation;manipulation=undefined;if(host.value?.hasPointerCapture(event.pointerId))host.value.releasePointerCapture(event.pointerId);if(event.type!=='pointercancel'){if(m.id.startsWith('token:'))emit('resize',m.id.slice(6),m.preview);else emit('transform',m.id,m.preview)};paint();return}
+  if(manipulation){if(manipulation.pointer!==event.pointerId)return;const m=manipulation;manipulation=undefined;if(host.value?.hasPointerCapture(event.pointerId))host.value.releasePointerCapture(event.pointerId);if(event.type!=='pointercancel'){if(m.id.startsWith('token:')){if(m.handle===4)emit('rotate',m.id.slice(6),m.preview.rotation??0);else emit('resize',m.id.slice(6),m.preview)}else emit('transform',m.id,m.preview)};paint();return}
   if (!drag || drag.pointer !== event.pointerId) return
   const finished = drag; drag = undefined
   if (host.value?.hasPointerCapture(event.pointerId)) host.value.releasePointerCapture(event.pointerId)

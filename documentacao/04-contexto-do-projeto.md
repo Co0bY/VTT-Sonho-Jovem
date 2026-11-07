@@ -93,3 +93,7 @@ A branch `feat/tokens-e-fichas-de-jogadores` separa personagens da campanha de s
 ## Atualização — tamanho e transparência de tokens
 
 Tokens no mapa recebem quatro alças de redimensionamento, com proporção/grid por padrão e Alt para tamanho livre. Dimensões são persistidas por presença; movimento e limites consideram o tamanho ampliado. O redimensionamento é só por arraste, sem pop-up. Imagens transparentes não têm círculo de cor nem sombra atrás; a identificação por cor passa para o nome abaixo do token. Delete mantém a remoção da presença sem apagar personagem. Consulte `24-tamanho-e-transparencia-dos-tokens.md` para regras e validações.
+
+## Atualização — rotação e marcador sem imagem
+
+Tokens selecionados agora têm alça circular para girar, com ângulo salvo por presença. O nome permanece horizontal; seleção e redimensionamento acompanham o giro. Sem imagem de Token, o marcador usa a cor de identificação e uma inicial; com imagem, a transparência continua preservada. Consulte `25-rotacao-e-marcador-dos-tokens.md` para uso, persistência e validações.
