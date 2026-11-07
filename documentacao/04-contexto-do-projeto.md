@@ -113,3 +113,7 @@ Descrição e anotações usam editor com formatação básica. Jogadores editam
 ## Atualização — editor visual da ficha
 
 A aba Ficha permite enviar um fundo e adicionar inputs posicionáveis, com rótulo, referência única (ex.: Força/for), tipo, largura e valor. Editar ficha alterna entre layout e preenchimento; Salvar personagem persiste tudo. Configurações da ficha continua vazia e as referências serão trabalhadas nessa aba em outra etapa. Consulte `31-editor-visual-da-ficha.md`.
+
+## Atualização — salvamento da ficha em edição
+
+Salvar personagem encerra o modo de edição da ficha e envia fundo, campos e valores, preservando os dados se a requisição falhar. O servidor de desenvolvimento passa a usar `--no-shell` para evitar uma API antiga órfã ocupando a porta após recarga. O ambiente foi reconstruído e um teste contra a aplicação publicada valida o envio `sheet`. Consulte `32-salvar-ficha-e-recarga-da-api.md`.

@@ -10,6 +10,7 @@ const emit=defineEmits<{close:[]}>()
 const name=ref(''),owner=ref(''),color=ref('#a47ae2'),localError=ref('')
 const tab=ref('card'),description=ref(''),notes=ref('')
 const sheet=ref(emptySheet())
+const sheetEditor=ref<InstanceType<typeof CharacterSheetEditor>>()
 const kinds=['appearance','token','sheet'] as const
 type Kind=typeof kinds[number]
 const inputs:Record<Kind,HTMLInputElement|null>={appearance:null,token:null,sheet:null}
@@ -38,6 +39,7 @@ async function save(){
   if(description.value.length>20000||notes.value.length>20000){localError.value='Use até 20.000 caracteres em cada editor, incluindo formatação.';return}
   const invalidSheet=sheetError(sheet.value)
   if(invalidSheet){tab.value='sheet';localError.value=invalidSheet;return}
+  sheetEditor.value?.finishEditing()
   const data=new FormData();data.append('sheet',JSON.stringify(sheet.value));data.append('text_format','html');data.append('name',name.value);if(props.master)data.append('owner_id',owner.value);data.append('color',color.value);data.append('description',description.value);data.append('notes',notes.value)
   for(const kind of kinds){if(uploads[kind])data.append(kind,uploads[kind]!);if(removed[kind])data.append(`remove_${kind}`,'true')}
   if(await props.save(props.character?.id??null,data))emit('close')
@@ -67,7 +69,7 @@ onBeforeUnmount(()=>{for(const kind of kinds)release(kind)})
       <label class="character-color">Cor de identificação<input v-model="color" type="color" :disabled="busy"></label>
       <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
       </section>
-      <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha"><CharacterSheetEditor v-if="open" v-model="sheet" :background="preview('sheet')" :disabled="busy" @background="selectImage('sheet',$event)" @remove-background="removeImage('sheet')" /></section>
+      <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha"><CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background="preview('sheet')" :disabled="busy" @background="selectImage('sheet',$event)" @remove-background="removeImage('sheet')" /></section>
       <section v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">
         <CharacterTextEditor v-model="notes" label="Anotações" :disabled="busy" />
       </section>

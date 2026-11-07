@@ -2,11 +2,12 @@
   "name": "@vtt/api",
   "private": true,
   "scripts": {
-    "dev": "node --env-file=../../.env ./node_modules/@nestjs/cli/bin/nest.js start --watch",
+    "dev": "node --env-file=../../.env ./node_modules/@nestjs/cli/bin/nest.js start --watch --no-shell",
     "build": "tsc",
     "test:integration": "pnpm run build && node --env-file=../../.env test/integration.cjs && node --env-file=../../.env test/password-reset.cjs",
     "test:browser": "pnpm run build && node --env-file=../../.env test/tabletop-browser.cjs",
     "test:scenes": "pnpm run build && node --env-file=../../.env test/scenes.cjs",
+    "test:sheet-browser": "node --env-file=../../.env test/character-sheet-browser.cjs",
     "test:characters": "pnpm run build && node --env-file=../../.env test/characters.cjs"
   },
   "dependencies": {

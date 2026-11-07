@@ -78,6 +78,8 @@ function imageLoaded(event:Event){
   const height=Math.max(300,Math.min(4000,Math.round(sheet.width*img.naturalHeight/img.naturalWidth)))
   emit('update:modelValue',{...sheet,height,fields:sheet.fields.map(field=>({...field,y:Math.round(Math.min(height-64,field.y*height/sheet.height))}))})
 }
+function finishEditing(){editing.value=false;drag=undefined}
+defineExpose({finishEditing})
 watch(()=>props.background,()=>{backgroundError.value=''})
 </script>
 <template>
