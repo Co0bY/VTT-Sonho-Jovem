@@ -2,11 +2,12 @@
   "name": "@vtt/api",
   "private": true,
   "scripts": {
-    "dev": "node --env-file=../../.env ./node_modules/@nestjs/cli/bin/nest.js start --watch",
+    "dev": "node --env-file=../../.env ./node_modules/@nestjs/cli/bin/nest.js start --watch --no-shell",
     "build": "tsc",
     "test:integration": "pnpm run build && node --env-file=../../.env test/integration.cjs && node --env-file=../../.env test/password-reset.cjs",
     "test:browser": "pnpm run build && node --env-file=../../.env test/tabletop-browser.cjs",
     "test:scenes": "pnpm run build && node --env-file=../../.env test/scenes.cjs",
+    "test:sheet-browser": "node --env-file=../../.env test/character-sheet-browser.cjs",
     "test:characters": "pnpm run build && node --env-file=../../.env test/characters.cjs"
   },
   "dependencies": {
@@ -17,7 +18,8 @@
     "nodemailer": "^10.3.1",
     "pg": "^8.0.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "sanitize-html": "^2.18.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
@@ -25,6 +27,7 @@
     "@types/node": "^26.0.0",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.0.0",
+    "@types/sanitize-html": "^2.16.2",
     "typescript": "~5.9.3"
   }
 }

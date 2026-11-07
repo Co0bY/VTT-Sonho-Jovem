@@ -9,6 +9,7 @@
     "test": "node --test test/geometry.test.mjs"
   },
   "dependencies": {
+    "dompurify": "^3.4.17",
     "pixi.js": "^8.22.0",
     "quasar": "^2.0.0",
     "vue": "^3.0.0",

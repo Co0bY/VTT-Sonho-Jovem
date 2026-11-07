@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Param, Req, Res, Injectable, Module, UnauthorizedException, BadRequestException, ForbiddenException, ConflictException, NotFoundException, HttpException, UseInterceptors, UploadedFile, UploadedFiles, StreamableFile } from '@nestjs/common'
+import { Query, Body, Controller, Get, Post, Param, Req, Res, Injectable, Module, UnauthorizedException, BadRequestException, ForbiddenException, ConflictException, NotFoundException, HttpException, UseInterceptors, UploadedFile, UploadedFiles, StreamableFile } from '@nestjs/common'
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { Database } from './database'
@@ -361,14 +361,22 @@ class ApiController {
     const file=await this.storage.read(access.campaign.owner_id,id,'cenarios',rows[0].filename)
     const ext=rows[0].filename.split('.').pop();res.setHeader('Content-Type',ext==='jpg'?'image/jpeg':`image/${ext}`);res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');return new StreamableFile(file.createReadStream())
   }
+  @Get('campaigns/:id/tabletop/presentations') async presentations(@Param('id') id:string,@Query('after') after:unknown,@Req() req:Request,@Res({passthrough:true}) res:Response){
+    res.setHeader('Cache-Control','no-store')
+    return this.characters.presentationEvents(await this.tableAccess(id,req),after)
+  }
+  @Post('campaigns/:id/tabletop/characters/:characterId/present') async presentCharacter(@Param('id') id:string,@Param('characterId') characterId:string,@Req() req:Request){
+    this.accounts.mutation(req)
+    return this.characters.showCard(await this.tableAccess(id,req),characterId)
+  }
   @Post('campaigns/:id/tabletop/characters')
-  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:2,fields:5}}))
+  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1},{name:'sheet',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:3,fields:10,fieldSize:200000}}))
   async createCharacter(@Param('id') id:string,@Body() body:Record<string,unknown>,@UploadedFiles() files:CharacterFiles|undefined,@Req() req:Request){
     this.accounts.mutation(req)
     return this.characters.save(await this.tableAccess(id,req),undefined,body,files)
   }
   @Post('campaigns/:id/tabletop/characters/:characterId/settings')
-  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:2,fields:5}}))
+  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1},{name:'sheet',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:3,fields:10,fieldSize:200000}}))
   async updateCharacter(@Param('id') id:string,@Param('characterId') characterId:string,@Body() body:Record<string,unknown>,@UploadedFiles() files:CharacterFiles|undefined,@Req() req:Request){
     this.accounts.mutation(req)
     return this.characters.save(await this.tableAccess(id,req),characterId,body,files)
