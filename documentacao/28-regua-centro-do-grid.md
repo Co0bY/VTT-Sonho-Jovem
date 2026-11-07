@@ -19,4 +19,4 @@ A lógica está em `measureRuler`, separada do componente PixiJS. A distância l
 
 Entrega preparada em `feat/regua-centro-do-grid`, na worktree `/tmp/vtt-regua`, a partir de `origin/main` atualizada. Ajuste também aplicado ao checkout em execução, preservando alterações locais anteriores.
 
-Publicação e PR rascunho bloqueados: `git push` sem credencial HTTPS e integração GitHub sem permissão (403, Resource not accessible by integration). Após restaurar o acesso, publicar esta branch e abrir PR rascunho para `main`, sem merge automático.
+Após autenticação do GitHub CLI pelo navegador com a conta Co0bY, a branch foi publicada em `origin`. PR em rascunho para `main`: https://github.com/Co0bY/VTT-Sonho-Jovem/pull/2. Nenhum merge realizado.
