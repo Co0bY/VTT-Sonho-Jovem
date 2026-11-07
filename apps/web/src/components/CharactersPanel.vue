@@ -1,0 +1,25 @@
+<script setup lang="ts">
+import type { Character,Token,Member,Layer } from '../tabletop/types'
+const props=defineProps<{characters:Character[];tokens:Token[];members:Member[];master:boolean;busy:boolean;selected:string}>()
+const emit=defineEmits<{create:[];edit:[character:Character];place:[id:string];select:[id:string];remove:[id:string];layer:[id:string,layer:Layer]}>()
+function drag(character:Character,event:DragEvent){
+  if(!props.master||props.busy){event.preventDefault();return}
+  event.dataTransfer?.setData('application/x-vtt-character',character.id)
+  if(event.dataTransfer)event.dataTransfer.effectAllowed='copy'
+}
+const instances=(id:string)=>props.tokens.filter(token=>token.character_id===id)
+</script>
+<template><section class="panel-content characters-panel">
+  <div class="panel-heading"><h2>Personagens</h2><span>{{ characters.length }} {{ master ? 'NA CAMPANHA' : 'SOB SEU CONTROLE' }}</span></div>
+  <p class="panel-help">{{ master ? 'Crie personagens e arraste-os para o mapa quando precisar. O retrato aparece aqui; o token aparece no cenário.' : 'Seus personagens ficam disponíveis entre cenários. No mapa, você pode mover aqueles atribuídos a você.' }}</p>
+  <button v-if="master" class="primary full" :disabled="busy" @click="emit('create')">+ Novo personagem</button>
+  <p v-if="!characters.length" class="panel-help characters-empty">Nenhum personagem cadastrado.</p>
+  <ul class="character-list"><li v-for="character in characters" :key="character.id" class="character-card" :data-character-id="character.id" :draggable="master && !busy" @dragstart="drag(character,$event)">
+    <div class="character-summary"><img v-if="character.appearance_url" :src="character.appearance_url" :alt="`Aparência de ${character.name}`" draggable="false"><span v-else class="character-initial" :style="{background:character.color}">{{ character.name.slice(0,1).toUpperCase() }}</span><div><strong>{{ character.name }}</strong><small>{{ members.find(member=>member.id===character.owner_id)?.name || 'Participante' }}</small><small>{{ instances(character.id).length ? `${instances(character.id).length} no mapa atual` : 'Fora deste mapa' }}</small></div></div>
+    <div v-if="master" class="character-actions"><button :disabled="busy" :aria-label="`Adicionar ${character.name} ao mapa`" @click="emit('place',character.id)">Adicionar ao mapa</button><button :disabled="busy" :aria-label="`Editar personagem ${character.name}`" @click="emit('edit',character)">Editar</button></div>
+    <ul v-if="instances(character.id).length" class="character-instances"><li v-for="token in instances(character.id)" :key="token.id" :class="{selected:selected===token.id}"><button :aria-label="`Selecionar ${character.name} no mapa`" @click="emit('select',token.id)">◉ {{ token.layer === 'mestre' ? 'Mestre' : token.layer === 'fundo' ? 'Fundo' : 'Geral' }}</button><select v-if="master" :value="token.layer" :disabled="busy" :aria-label="`Camada do token ${character.name}`" @change="emit('layer',token.id,($event.target as HTMLSelectElement).value as Layer)"><option value="fundo">Fundo</option><option value="mestre">Mestre</option><option value="geral">Geral</option></select><button v-if="master" :disabled="busy" :aria-label="`Remover ${character.name} do mapa`" @click="emit('remove',token.id)">×</button></li></ul>
+  </li></ul>
+</section></template>
+<style scoped>
+.characters-empty{margin-top:20px}.character-list,.character-instances{list-style:none;padding:0}.character-list{margin:18px 0}.character-card{border:1px solid #513761;border-radius:10px;background:#281c32;padding:12px;margin-bottom:12px}.character-card[draggable=true]{cursor:grab}.character-summary{display:flex;gap:12px;align-items:center}.character-summary>img,.character-initial{width:65px;height:80px;flex-shrink:0;object-fit:cover;border-radius:7px;background:#17101e}.character-initial{display:grid;place-items:center;color:white;font-size:25px}.character-summary>div{min-width:0}.character-summary strong{font-size:13px;overflow-wrap:anywhere;display:block}.character-summary small{display:block;color:#ad94bd;font-size:10px;line-height:1.6;margin-top:4px}.character-actions{display:flex;gap:8px;margin-top:12px}.character-actions button,.character-instances button{color:#dec5f2;background:#3a2748;border:1px solid #614174;border-radius:6px;font-size:10px;padding:7px}.character-actions button:first-child{flex:1}.character-instances{margin:12px 0 0}.character-instances li{display:flex;align-items:center;gap:5px;padding:5px 0}.character-instances li.selected{border-bottom:1px solid #b386d6}.character-instances button:first-child{flex:1;text-align:left}.character-instances select{width:80px;margin:0;padding:6px;font-size:10px}
+</style>

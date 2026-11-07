@@ -4,10 +4,12 @@ import { Application, Container, Graphics, Text, Texture, Sprite } from 'pixi.js
 import type { Scene, Token, Tool, Layer, SceneObject, Rect } from '../tabletop/types'
 import { hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, distance, type Camera, type Point } from '../tabletop/geometry'
 const props = defineProps<{ scene: Scene; tokens: Token[]; objects: SceneObject[]; layer: Layer; userId: string; master: boolean; tool: Tool; selected: string; locked: boolean }>()
-const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string] }>()
+const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point] }>()
 const host = ref<HTMLDivElement>(), failure = ref(''), backgroundError = ref(''), backgroundLoading = ref(false)
 let backgroundTexture: Texture | undefined, backgroundAbort: AbortController | undefined, backgroundVersion = 0
 let app: Application | undefined, world: Container, observer: ResizeObserver | undefined, disposed = false
+const tokenTextures=new Map<string,Texture>(),tokenImageError=ref('')
+let tokenAbort:AbortController|undefined,tokenVersion=0
 const objectTextures = new Map<string,Texture>()
 let objectAbort: AbortController | undefined, objectVersion=0
 let camera: Camera = { x: 0, y: 0, scale: 0.6 }
@@ -57,8 +59,13 @@ function paint() {
     if (props.selected === token.id) item.addChild(new Graphics().circle(0, 0, radius + 6).stroke({ color: 0xe0caff, width: 3 }))
     item.addChild(new Graphics().circle(2, 4, radius + 1).fill({ color: 0x000000, alpha: 0.4 }))
     item.addChild(new Graphics().circle(0, 0, radius).fill(token.color).stroke({ color: 0xe7d7ff, width: 2 }))
-    const initials = new Text({ text: token.name.split(/\s+/).map(s => s[0]).slice(0, 2).join('').toUpperCase(), style: { fontFamily: 'Arial', fontSize: cell * 0.28, fill: '#ffffff', fontWeight: 'bold' } })
-    initials.anchor.set(0.5); item.addChild(initials)
+    const texture=token.token_url?tokenTextures.get(token.token_url):undefined
+    if(texture){
+      const image=new Sprite(texture);image.anchor.set(0.5);image.scale.set(Math.min(radius*2/texture.width,radius*2/texture.height));item.addChild(image)
+    }else{
+      const initials = new Text({ text: token.name.split(/\s+/).map(s => s[0]).slice(0, 2).join('').toUpperCase(), style: { fontFamily: 'Arial', fontSize: cell * 0.28, fill: '#ffffff', fontWeight: 'bold' } })
+      initials.anchor.set(0.5); item.addChild(initials)
+    }
     const label = new Text({ text: token.name, style: { fontFamily: 'Arial', fontSize: 13, fill: '#f1e8ff', stroke: { color: '#17131e', width: 4 } } })
     label.anchor.set(0.5, 0); label.scale.set(1 / camera.scale); label.y = radius + 8 / camera.scale; item.addChild(label); item.alpha=layer==='mestre' && props.layer!=='mestre'?0.5:1;world.addChild(item)
   }
@@ -92,6 +99,21 @@ function backgroundBounds():Rect|undefined{
   const width=backgroundTexture.width*scale,height=backgroundTexture.height*scale
   return {x:(props.scene.width-width)/2,y:(props.scene.height-height)/2,width,height}
 }
+async function loadTokenImages(){
+  const version=++tokenVersion;tokenAbort?.abort();tokenAbort=new AbortController();tokenImageError.value=''
+  const urls=new Set(props.tokens.map(token=>token.token_url).filter((url):url is string=>!!url))
+  for(const [url,texture] of tokenTextures)if(!urls.has(url)){tokenTextures.delete(url);texture.destroy(true)}
+  await Promise.all([...urls].filter(url=>!tokenTextures.has(url)).map(async url=>{
+    try{
+      const response=await fetch(url,{credentials:'same-origin',signal:tokenAbort!.signal})
+      if(!response.ok)throw new Error('Falha na imagem do token.')
+      const image=await createImageBitmap(await response.blob())
+      if(disposed||version!==tokenVersion){image.close();return}
+      tokenTextures.set(url,Texture.from(image));paint()
+    }catch{if(!disposed&&version===tokenVersion)tokenImageError.value='Não foi possível carregar uma imagem de token. As iniciais continuam disponíveis.'}
+  }));paint()
+}
+watch(()=>props.tokens.map(token=>token.token_url??'').sort().join('|'),loadTokenImages)
 async function loadObjects(){
   const version=++objectVersion;objectAbort?.abort();objectAbort=new AbortController()
   for(const [id,texture] of objectTextures)if(!props.objects.some(object=>object.id===id)){objectTextures.delete(id);texture.destroy(true)}
@@ -145,6 +167,22 @@ async function loadBackground() {
 }
 watch(() => props.scene.background_url, loadBackground)
 function point(event: PointerEvent | WheelEvent | MouseEvent): Point { const bounds = host.value!.getBoundingClientRect(); return { x: event.clientX - bounds.left, y: event.clientY - bounds.top } }
+function placementPoint():Point{
+  const at=host.value?toWorld({x:host.value.clientWidth/2,y:host.value.clientHeight/2},camera):{x:props.scene.width/2,y:props.scene.height/2}
+  return tokenPosition(at,props.scene.cell_size,props.scene.snap,props.scene.width,props.scene.height,props.scene.grid_type)
+}
+function dragOver(event:DragEvent){
+  if(props.master&&!props.locked&&event.dataTransfer?.types.includes('application/x-vtt-character')){event.preventDefault();event.dataTransfer.dropEffect='copy'}
+}
+function dropCharacter(event:DragEvent){
+  if(!props.master||props.locked)return
+  const id=event.dataTransfer?.getData('application/x-vtt-character')
+  if(!id)return
+  event.preventDefault()
+  const at=toWorld(point(event),camera)
+  if(at.x<0||at.y<0||at.x>props.scene.width||at.y>props.scene.height)return
+  emit('place',id,tokenPosition(at,props.scene.cell_size,props.scene.snap,props.scene.width,props.scene.height,props.scene.grid_type))
+}
 function down(event: PointerEvent) {
   if (drag || manipulation || !app || !host.value) return
   if (![0, 1, 2].includes(event.button)) return
@@ -265,11 +303,11 @@ onMounted(async () => {
       camera.x = width / 2 - centerPoint.x * camera.scale; camera.y = height / 2 - centerPoint.y * camera.scale
       paint()
     }); observer.observe(host.value!)
-    host.value!.addEventListener('wheel', wheel, { passive: false }); center(); void loadBackground();void loadObjects()
+    host.value!.addEventListener('wheel', wheel, { passive: false }); center(); void loadBackground();void loadObjects();void loadTokenImages()
   } catch { failure.value = 'Não foi possível iniciar o cenário. Verifique se a aceleração gráfica do navegador está habilitada e recarregue a página.' }
 })
-onBeforeUnmount(() => { disposed = true; backgroundVersion++; backgroundAbort?.abort();objectVersion++;objectAbort?.abort(); observer?.disconnect(); host.value?.removeEventListener('wheel', wheel); if (app) app.destroy(true, { children: true }); backgroundTexture?.destroy(true);for(const texture of objectTextures.values())texture.destroy(true) })
-defineExpose({ zoomBy, center })
+onBeforeUnmount(() => { disposed = true;tokenVersion++;tokenAbort?.abort(); backgroundVersion++; backgroundAbort?.abort();objectVersion++;objectAbort?.abort(); observer?.disconnect(); host.value?.removeEventListener('wheel', wheel); if (app) app.destroy(true, { children: true }); backgroundTexture?.destroy(true);for(const texture of objectTextures.values())texture.destroy(true);for(const texture of tokenTextures.values())texture.destroy(true) })
+defineExpose({ zoomBy, center, placementPoint, focus:()=>host.value?.focus() })
 </script>
-<template><div ref="host" class="pixi-board" :class="`tool-${tool}`" tabindex="0" role="application" aria-label="Cenário da mesa. Arraste para navegar, use a roda para zoom. Selecione um token e use as setas para movê-lo ou Delete para excluir. Imagens: cantos mantêm proporção no grid; Alt permite tamanho livre." @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up" @contextmenu.prevent @dblclick="doubleClick" @keydown="keyboard" @keyup="keyboard"><p v-if="failure" role="alert" class="board-failure">{{ failure }}</p><p v-if="backgroundLoading" class="background-status" role="status">Carregando imagem…</p><p v-if="backgroundError" class="background-status" role="alert">{{ backgroundError }}</p></div></template>
+<template><div ref="host" class="pixi-board" :class="`tool-${tool}`" tabindex="0" role="application" aria-label="Cenário da mesa. Arraste para navegar, use a roda para zoom. Selecione um token e use as setas para movê-lo ou Delete para excluir. Imagens: cantos mantêm proporção no grid; Alt permite tamanho livre." @dragover="dragOver" @drop="dropCharacter" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up" @contextmenu.prevent @dblclick="doubleClick" @keydown="keyboard" @keyup="keyboard"><p v-if="failure" role="alert" class="board-failure">{{ failure }}</p><p v-if="backgroundLoading" class="background-status" role="status">Carregando imagem…</p><p v-if="tokenImageError" class="background-status" role="alert">{{ tokenImageError }}</p><p v-if="backgroundError" class="background-status" role="alert">{{ backgroundError }}</p></div></template>
 <style scoped>.pixi-board{width:100%;height:100%;overflow:hidden;touch-action:none;outline:none;position:relative}.pixi-board:focus-visible{box-shadow:inset 0 0 0 2px #b48ce9}.pixi-board :deep(canvas){display:block}.tool-pan{cursor:grab}.tool-measure{cursor:crosshair}.board-failure{padding:40px;color:#ffd1d8;max-width:500px}.background-status{position:absolute;bottom:65px;left:20px;background:#2d203c;color:#e0caef;font-size:11px;padding:10px;border-radius:6px;z-index:2}</style>

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Param, Req, Res, Injectable, Module, UnauthorizedException, BadRequestException, ForbiddenException, ConflictException, NotFoundException, HttpException, UseInterceptors, UploadedFile, StreamableFile } from '@nestjs/common'
+import { Body, Controller, Get, Post, Param, Req, Res, Injectable, Module, UnauthorizedException, BadRequestException, ForbiddenException, ConflictException, NotFoundException, HttpException, UseInterceptors, UploadedFile, UploadedFiles, StreamableFile } from '@nestjs/common'
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { Database } from './database'
@@ -7,7 +7,8 @@ import { Storage, MAX_IMAGE_BYTES } from './storage'
 import { sceneSize, sceneError } from './scene-dimensions'
 import { layer, bounds } from './layers'
 import { imageSize } from 'image-size'
-import { FileInterceptor } from '@nestjs/platform-express'
+import { Characters, type CharacterFiles } from './characters'
+import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express'
 import { Mailer } from './mailer'
 import { position, rollDice, integer } from './tabletop-rules'
 
@@ -58,7 +59,7 @@ class Accounts {
 }
 @Controller()
 class ApiController {
-  constructor(private readonly accounts: Accounts, private readonly db: Database, private readonly mailer: Mailer, private readonly scenes: Scenes, private readonly storage: Storage) {}
+  constructor(private readonly accounts: Accounts, private readonly db: Database, private readonly mailer: Mailer, private readonly scenes: Scenes, private readonly storage: Storage, private readonly characters:Characters) {}
   @Get('health') async health() { await this.db.pool.query('SELECT 1'); return { status: 'ok', database: 'up' } }
   @Get('auth/me') async me(@Req() req: Request, @Res({ passthrough: true }) res: Response) { res.setHeader('Cache-Control', 'no-store'); return this.accounts.user(req) }
   @Post('auth/register') async register(@Body() body: unknown, @Req() req: Request) {
@@ -173,17 +174,18 @@ class ApiController {
   @Get('campaigns/:id/tabletop') async tabletop(@Param('id') id: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store')
     const access = await this.tableAccess(id, req)
-    const [sceneList, tokens, messages, members, objects, folders] = await Promise.all([
+    const [sceneList, tokens, messages, members, objects, folders, characters] = await Promise.all([
       this.db.pool.query('SELECT * FROM tabletop_scenes WHERE campaign_id=$1 AND ($2::boolean OR id=$3) ORDER BY created_at,id', [id, access.master, access.scene.id]),
-      this.db.pool.query("SELECT id,owner_id,name,color,x,y,layer FROM tabletop_tokens WHERE campaign_id=$1 AND scene_id=$2 AND ($3::boolean OR layer<>'mestre') ORDER BY created_at,id", [id,access.scene.id,access.master]),
+      this.db.pool.query("SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.layer,c.token_file FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND t.scene_id=$2 AND ($3::boolean OR t.layer<>'mestre') ORDER BY t.created_at,t.id", [id,access.scene.id,access.master]),
       this.db.pool.query(`SELECT * FROM (SELECT m.id::text,m.content,m.roll,m.created_at,u.name AS author,u.id AS user_id FROM tabletop_messages m
         JOIN users u ON u.id=m.user_id WHERE m.campaign_id=$1 ORDER BY m.id DESC LIMIT 100) latest ORDER BY created_at,id::bigint`, [id]),
       this.db.pool.query(`SELECT u.id,u.name,CASE WHEN u.id=$2 THEN 'mestre' ELSE 'jogador' END AS role FROM users u
         WHERE u.id=$2 OR EXISTS(SELECT 1 FROM campaign_members m WHERE m.campaign_id=$1 AND m.user_id=u.id) ORDER BY u.name`, [id, access.campaign.owner_id]),
       this.db.pool.query("SELECT id,name,layer,x,y,width,height,rotation FROM tabletop_objects WHERE campaign_id=$1 AND scene_id=$2 AND ($3::boolean OR layer<>'mestre') ORDER BY created_at,id",[id,access.scene.id,access.master]),
       this.db.pool.query('SELECT id,name FROM tabletop_scene_folders WHERE campaign_id=$1 AND $2::boolean ORDER BY lower(name),id',[id,access.master]),
+      this.db.pool.query('SELECT * FROM tabletop_characters WHERE campaign_id=$1 AND ($2::boolean OR owner_id=$3) ORDER BY created_at,id',[id,access.master,access.user.id]),
     ])
-    return { folders:folders.rows, campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: tokens.rows, objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), messages: messages.rows, members: members.rows }
+    return { characters:characters.rows.map(character=>this.characters.present(character)), folders:folders.rows, campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: tokens.rows.map(({token_file,...token})=>({...token,token_url:token_file?`/api/campaigns/${id}/tabletop/characters/${token.character_id}/images/token/${token_file}`:null})), objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), messages: messages.rows, members: members.rows }
   }
   @Post('campaigns/:id/tabletop/settings') async tableSettings(@Param('id') id: string, @Body() body: Record<string, unknown>, @Req() req: Request) {
     this.accounts.mutation(req)
@@ -359,6 +361,28 @@ class ApiController {
     const file=await this.storage.read(access.campaign.owner_id,id,'cenarios',rows[0].filename)
     const ext=rows[0].filename.split('.').pop();res.setHeader('Content-Type',ext==='jpg'?'image/jpeg':`image/${ext}`);res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');return new StreamableFile(file.createReadStream())
   }
+  @Post('campaigns/:id/tabletop/characters')
+  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:2,fields:5}}))
+  async createCharacter(@Param('id') id:string,@Body() body:Record<string,unknown>,@UploadedFiles() files:CharacterFiles|undefined,@Req() req:Request){
+    this.accounts.mutation(req)
+    return this.characters.save(await this.tableAccess(id,req),undefined,body,files)
+  }
+  @Post('campaigns/:id/tabletop/characters/:characterId/settings')
+  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:2,fields:5}}))
+  async updateCharacter(@Param('id') id:string,@Param('characterId') characterId:string,@Body() body:Record<string,unknown>,@UploadedFiles() files:CharacterFiles|undefined,@Req() req:Request){
+    this.accounts.mutation(req)
+    return this.characters.save(await this.tableAccess(id,req),characterId,body,files)
+  }
+  @Post('campaigns/:id/tabletop/characters/:characterId/place') async placeCharacter(@Param('id') id:string,@Param('characterId') characterId:string,@Body() body:Record<string,unknown>,@Req() req:Request){
+    this.accounts.mutation(req)
+    return this.characters.place(await this.tableAccess(id,req),characterId,body)
+  }
+  @Get('campaigns/:id/tabletop/characters/:characterId/images/:kind/:filename') async characterImage(@Param('id') id:string,@Param('characterId') characterId:string,@Param('kind') kind:string,@Param('filename') filename:string,@Req() req:Request,@Res({passthrough:true}) res:Response){
+    const file=await this.characters.image(await this.tableAccess(id,req),characterId,kind,filename)
+    const ext=filename.split('.').pop();res.setHeader('Content-Type',ext==='jpg'?'image/jpeg':`image/${ext}`)
+    res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff')
+    return new StreamableFile(file.createReadStream())
+  }
   @Post('campaigns/:id/tabletop/tokens') async addToken(@Param('id') id: string, @Body() body: Record<string, unknown>, @Req() req: Request) {
     this.accounts.mutation(req)
     const access = await this.tableAccess(id, req)
@@ -419,5 +443,5 @@ class ApiController {
     return { campaignId: rows[0].id }
   }
 }
-@Module({ controllers: [ApiController], providers: [Database, Accounts, Mailer, Scenes, Storage] })
+@Module({ controllers: [ApiController], providers: [Database, Accounts, Mailer, Scenes, Storage, Characters] })
 export class AppModule {}

@@ -85,3 +85,7 @@ As entregas acumuladas foram organizadas em commits Conventional Commits por API
 ## Fluxo atual — branches e Pull Requests
 
 A partir de agora, novas entregas usam branches temáticas, commits Conventional Commits, publicação em `origin` e PRs inicialmente em rascunho para `main`. Não desenvolver novas entregas diretamente em `main`; merge somente por solicitação explícita do usuário. O modo mentoria permanece ativo. A próxima frente foi aberta em `feat/tokens-e-fichas-de-jogadores`; o escopo funcional de tokens/fichas ainda será detalhado. As instruções persistem em `AGENTS.md` e o fluxo está explicado em `22-fluxo-de-branches-e-prs.md`.
+
+## Atualização — personagens, aparência e token
+
+A branch `feat/tokens-e-fichas-de-jogadores` separa personagens da campanha de suas presenças em cenários. O painel Personagens usa Aparência; o mapa usa a imagem de Token. Criar um personagem abre pop-up com os dois seletores no topo e não adiciona presença automaticamente. Cartões podem ser arrastados ou adicionados pelo botão. Cenários vazios são permitidos; remover presença ou excluir cenário preserva o personagem. Tokens anteriores são migrados sem perder posições ou controle. Consulte `23-personagens-aparencia-e-token.md` para uso, modelo, permissões e testes.
