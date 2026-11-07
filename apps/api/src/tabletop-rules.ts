@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common'
+import { hexPosition } from './grid'
 import { randomInt } from 'node:crypto'
 
 export const BOARD_WIDTH = 3200
@@ -7,10 +8,11 @@ export function integer(value: unknown, min: number, max: number, label: string)
   if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) throw new BadRequestException(`${label}: informe um inteiro entre ${min} e ${max}.`)
   return value
 }
-export function position(x: unknown, y: unknown, cell: number, snap: boolean, width=BOARD_WIDTH, height=BOARD_HEIGHT) {
+export function position(x: unknown, y: unknown, cell: number, snap: boolean, width=BOARD_WIDTH, height=BOARD_HEIGHT, gridType='square') {
   const px = integer(x, 0, width, 'Posição X')
   const py = integer(y, 0, height, 'Posição Y')
-  const align = (n: number, limit: number) => Math.max(cell / 2, Math.min(limit - cell / 2, snap ? Math.floor(n / cell) * cell + cell / 2 : n))
+  if(snap&&gridType==='hex')return hexPosition({x:px,y:py},cell,width,height)
+  const align = (n: number, limit: number) => Math.max(cell / 2, Math.min(limit - cell / 2, snap && gridType!=='none' ? Math.floor(n / cell) * cell + cell / 2 : n))
   return { x: align(px, width), y: align(py, height) }
 }
 export function rollDice(expression: string) {

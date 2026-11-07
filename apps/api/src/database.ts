@@ -108,6 +108,14 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
       `)
       await client.query(`
         ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS background_transform jsonb;
+        DO $$ BEGIN
+          IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='tabletop_scenes' AND column_name='grid_type') THEN
+            ALTER TABLE tabletop_scenes ADD COLUMN grid_type varchar(6) NOT NULL DEFAULT 'square' CHECK(grid_type IN ('square','hex','none'));
+            UPDATE tabletop_scenes SET grid_type='none' WHERE NOT grid_visible;
+          END IF;
+        END $$;
+        ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS grid_color varchar(7) NOT NULL DEFAULT '#a29aad' CHECK(grid_color ~ '^#[0-9a-fA-F]{6}$');
+        ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS grid_opacity double precision NOT NULL DEFAULT 0.16 CHECK(grid_opacity BETWEEN 0 AND 1);
         ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS layer varchar(8) NOT NULL DEFAULT 'geral' CHECK(layer IN ('fundo','mestre','geral'));
         CREATE TABLE IF NOT EXISTS tabletop_objects (
           id uuid PRIMARY KEY,
@@ -123,6 +131,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
           created_at timestamptz NOT NULL DEFAULT now(),
           FOREIGN KEY(scene_id,campaign_id) REFERENCES tabletop_scenes(id,campaign_id) ON DELETE CASCADE
         );
+        ALTER TABLE tabletop_objects ADD COLUMN IF NOT EXISTS rotation double precision NOT NULL DEFAULT 0 CHECK(rotation>=0 AND rotation<360);
         DO $$ DECLARE item record; keeper record; next_name text; suffix integer; BEGIN
           IF NOT EXISTS(SELECT 1 FROM pg_indexes WHERE indexname='tabletop_scene_name_unique') THEN
             FOR item IN SELECT s.* FROM tabletop_scenes s ORDER BY
@@ -214,6 +223,23 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
         END $$;
         DROP TRIGGER IF EXISTS scene_content_bounds ON tabletop_scenes;
         CREATE CONSTRAINT TRIGGER scene_content_bounds AFTER UPDATE ON tabletop_scenes DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_scene_content_bounds();
+      `)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS tabletop_scene_folders (
+          id uuid PRIMARY KEY,
+          campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          name varchar(100) NOT NULL CHECK(length(btrim(name))>0),
+          UNIQUE(id,campaign_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS tabletop_folder_name_unique ON tabletop_scene_folders(campaign_id,lower(btrim(name)));
+        ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS folder_id uuid;
+        DO $$ BEGIN
+          IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='tabletop_scene_folder_fk') THEN
+            ALTER TABLE tabletop_scenes ADD CONSTRAINT tabletop_scene_folder_fk FOREIGN KEY(folder_id,campaign_id)
+              REFERENCES tabletop_scene_folders(id,campaign_id) ON DELETE SET NULL (folder_id);
+          END IF;
+        END $$;
+        CREATE INDEX IF NOT EXISTS tabletop_scenes_folder_idx ON tabletop_scenes(folder_id);
       `)
       await client.query('COMMIT')
     } catch (error) { await client.query('ROLLBACK'); throw error }

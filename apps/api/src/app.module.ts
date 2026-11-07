@@ -173,16 +173,17 @@ class ApiController {
   @Get('campaigns/:id/tabletop') async tabletop(@Param('id') id: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store')
     const access = await this.tableAccess(id, req)
-    const [sceneList, tokens, messages, members, objects] = await Promise.all([
+    const [sceneList, tokens, messages, members, objects, folders] = await Promise.all([
       this.db.pool.query('SELECT * FROM tabletop_scenes WHERE campaign_id=$1 AND ($2::boolean OR id=$3) ORDER BY created_at,id', [id, access.master, access.scene.id]),
       this.db.pool.query("SELECT id,owner_id,name,color,x,y,layer FROM tabletop_tokens WHERE campaign_id=$1 AND scene_id=$2 AND ($3::boolean OR layer<>'mestre') ORDER BY created_at,id", [id,access.scene.id,access.master]),
       this.db.pool.query(`SELECT * FROM (SELECT m.id::text,m.content,m.roll,m.created_at,u.name AS author,u.id AS user_id FROM tabletop_messages m
         JOIN users u ON u.id=m.user_id WHERE m.campaign_id=$1 ORDER BY m.id DESC LIMIT 100) latest ORDER BY created_at,id::bigint`, [id]),
       this.db.pool.query(`SELECT u.id,u.name,CASE WHEN u.id=$2 THEN 'mestre' ELSE 'jogador' END AS role FROM users u
         WHERE u.id=$2 OR EXISTS(SELECT 1 FROM campaign_members m WHERE m.campaign_id=$1 AND m.user_id=u.id) ORDER BY u.name`, [id, access.campaign.owner_id]),
-      this.db.pool.query("SELECT id,name,layer,x,y,width,height FROM tabletop_objects WHERE campaign_id=$1 AND scene_id=$2 AND ($3::boolean OR layer<>'mestre') ORDER BY created_at,id",[id,access.scene.id,access.master]),
+      this.db.pool.query("SELECT id,name,layer,x,y,width,height,rotation FROM tabletop_objects WHERE campaign_id=$1 AND scene_id=$2 AND ($3::boolean OR layer<>'mestre') ORDER BY created_at,id",[id,access.scene.id,access.master]),
+      this.db.pool.query('SELECT id,name FROM tabletop_scene_folders WHERE campaign_id=$1 AND $2::boolean ORDER BY lower(name),id',[id,access.master]),
     ])
-    return { campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: tokens.rows, objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), messages: messages.rows, members: members.rows }
+    return { folders:folders.rows, campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: tokens.rows, objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), messages: messages.rows, members: members.rows }
   }
   @Post('campaigns/:id/tabletop/settings') async tableSettings(@Param('id') id: string, @Body() body: Record<string, unknown>, @Req() req: Request) {
     this.accounts.mutation(req)
@@ -196,11 +197,43 @@ class ApiController {
     if (!access.master) throw new ForbiddenException('Somente o mestre pode criar cenários.')
     const name = field(body,'name',1,100)
     const size=sceneSize(body as Record<string,unknown>,{width:3200,height:2200})
+    const folder=await this.scenes.folderId(id,(body as Record<string,unknown>)?.folder_id)
     const cell=integer((body as Record<string,unknown>)?.cell_size??64,32,128,'Tamanho do grid')
     try {
-      const result = await this.db.pool.query('INSERT INTO tabletop_scenes(id,campaign_id,name,width,height,cell_size) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[randomUUID(),id,name,size.width,size.height,cell])
+      const result = await this.db.pool.query('INSERT INTO tabletop_scenes(id,campaign_id,name,width,height,cell_size,folder_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[randomUUID(),id,name,size.width,size.height,cell,folder])
       return this.scenes.present(result.rows[0])
-    } catch(error) { if((error as {code?:string}).code==='23505') throw new ConflictException('Já existe um cenário com esse nome nesta mesa.');throw error }
+    } catch(error) { if((error as {code?:string}).code==='23505') throw new ConflictException('Já existe um cenário com esse nome nesta mesa.');sceneError(error) }
+  }
+  @Post('campaigns/:id/tabletop/folders') async createFolder(@Param('id') id:string,@Body() body:unknown,@Req() req:Request){
+    this.accounts.mutation(req);const access=await this.tableAccess(id,req)
+    if(!access.master)throw new ForbiddenException('Somente o mestre pode organizar cenários.')
+    const name=field(body,'name',1,100)
+    try{const result=await this.db.pool.query('INSERT INTO tabletop_scene_folders(id,campaign_id,name) VALUES($1,$2,$3) RETURNING id,name',[randomUUID(),id,name]);return result.rows[0]}
+    catch(error){if((error as {code?:string}).code==='23505')throw new ConflictException('Já existe uma pasta com esse nome nesta mesa.');throw error}
+  }
+  @Post('campaigns/:id/tabletop/folders/:folderId/settings') async renameFolder(@Param('id') id:string,@Param('folderId') folderId:string,@Body() body:unknown,@Req() req:Request){
+    this.accounts.mutation(req);const access=await this.tableAccess(id,req)
+    if(!access.master)throw new ForbiddenException('Somente o mestre pode organizar cenários.')
+    await this.scenes.folderId(id,folderId);const name=field(body,'name',1,100)
+    try{const result=await this.db.pool.query('UPDATE tabletop_scene_folders SET name=$1 WHERE id=$2 AND campaign_id=$3 RETURNING id',[name,folderId,id]);if(!result.rowCount)throw new NotFoundException('Pasta não encontrada.');return {ok:true}}
+    catch(error){if((error as {code?:string}).code==='23505')throw new ConflictException('Já existe uma pasta com esse nome nesta mesa.');throw error}
+  }
+  @Post('campaigns/:id/tabletop/folders/:folderId/remove') async removeFolder(@Param('id') id:string,@Param('folderId') folderId:string,@Req() req:Request){
+    this.accounts.mutation(req);const access=await this.tableAccess(id,req)
+    if(!access.master)throw new ForbiddenException('Somente o mestre pode organizar cenários.')
+    await this.scenes.folderId(id,folderId)
+    const result=await this.db.pool.query('DELETE FROM tabletop_scene_folders WHERE id=$1 AND campaign_id=$2 RETURNING id',[folderId,id])
+    if(!result.rowCount)throw new NotFoundException('Pasta não encontrada.')
+    return {ok:true}
+  }
+  @Post('campaigns/:id/tabletop/scenes/:sceneId/folder') async moveSceneFolder(@Param('id') id:string,@Param('sceneId') sceneId:string,@Body() body:Record<string,unknown>,@Req() req:Request){
+    this.accounts.mutation(req);const access=await this.tableAccess(id,req)
+    if(!access.master)throw new ForbiddenException('Somente o mestre pode organizar cenários.')
+    await this.scenes.find(id,sceneId)
+    if(body.folder_id===undefined)throw new BadRequestException('Selecione uma pasta ou Sem pasta.')
+    const folder=await this.scenes.folderId(id,body.folder_id)
+    try{const result=await this.db.pool.query('UPDATE tabletop_scenes SET folder_id=$1 WHERE id=$2 AND campaign_id=$3 RETURNING id',[folder,sceneId,id]);if(!result.rowCount)throw new NotFoundException('Cenário não encontrado.')}catch(error){sceneError(error)}
+    return {ok:true}
   }
   @Post('campaigns/:id/tabletop/scenes/:sceneId/settings') async updateScene(@Param('id') id: string, @Param('sceneId') sceneId: string, @Body() body: Record<string,unknown>, @Req() req: Request) {
     this.accounts.mutation(req)
@@ -305,9 +338,18 @@ class ApiController {
     try{
     await client.query('BEGIN')
     await client.query('UPDATE tabletop_scenes SET width=$1,height=$2,cell_size=$4 WHERE id=$3',[size.width,size.height,access.scene.id,cell])
-    const result=await client.query('UPDATE tabletop_objects SET x=$1,y=$2,width=$3,height=$4,layer=COALESCE($5,layer) WHERE id=$6 AND campaign_id=$7 AND scene_id=$8 RETURNING id',[rect.x,rect.y,rect.width,rect.height,body.layer===undefined?null:layer(body.layer),objectId,id,access.scene.id])
+    const result=await client.query('UPDATE tabletop_objects SET x=$1,y=$2,width=$3,height=$4,rotation=$9,layer=COALESCE($5,layer) WHERE id=$6 AND campaign_id=$7 AND scene_id=$8 RETURNING id',[rect.x,rect.y,rect.width,rect.height,body.layer===undefined?null:layer(body.layer),objectId,id,access.scene.id,rect.rotation])
     if(!result.rowCount)throw new NotFoundException('Objeto não encontrado.');await client.query('COMMIT');return {ok:true}
     }catch(error){await client.query('ROLLBACK');sceneError(error)}finally{client.release()}
+  }
+  @Post('campaigns/:id/tabletop/objects/:objectId/remove') async removeObject(@Param('id') id:string,@Param('objectId') objectId:string,@Req() req:Request){
+    this.accounts.mutation(req);const access=await this.tableAccess(id,req)
+    if(!access.master)throw new ForbiddenException('Somente o mestre pode excluir objetos.')
+    if(!uuid.test(objectId))throw new BadRequestException('Objeto inválido.')
+    const result=await this.db.pool.query('DELETE FROM tabletop_objects WHERE id=$1 AND campaign_id=$2 AND scene_id=$3 RETURNING filename',[objectId,id,access.scene.id])
+    if(!result.rowCount)throw new NotFoundException('Objeto não encontrado.')
+    try{await this.storage.remove(access.campaign.owner_id,id,'cenarios',result.rows[0].filename)}catch{console.warn('Não foi possível limpar a imagem do objeto excluído.')}
+    return {ok:true}
   }
   @Get('campaigns/:id/tabletop/objects/:objectId/image') async objectImage(@Param('id') id:string,@Param('objectId') objectId:string,@Req() req:Request,@Res({passthrough:true}) res:Response){
     const access=await this.tableAccess(id,req)
@@ -328,14 +370,14 @@ class ApiController {
     const members = await this.db.pool.query(`SELECT id FROM users WHERE id=$1 AND (id=$2 OR EXISTS(SELECT 1 FROM campaign_members WHERE campaign_id=$3 AND user_id=$1))`, [owner, access.campaign.owner_id, id])
     if (!members.rowCount) throw new BadRequestException('O controlador precisa participar da mesa.')
     const targetLayer = layer(body.layer || 'geral')
-    const coords = position(body.x, body.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height)
+    const coords = position(body.x, body.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type)
     return (await this.db.pool.query('INSERT INTO tabletop_tokens(id,campaign_id,owner_id,name,color,x,y,scene_id,layer) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *', [randomUUID(), id, owner, name, color, coords.x, coords.y, access.scene.id, targetLayer])).rows[0]
   }
   @Post('campaigns/:id/tabletop/tokens/:tokenId/move') async moveToken(@Param('id') id: string, @Param('tokenId') tokenId: string, @Body() body: Record<string, unknown>, @Req() req: Request) {
     this.accounts.mutation(req)
     const access = await this.tableAccess(id, req)
     if (!uuid.test(tokenId)) throw new BadRequestException('Token inválido.')
-    const coords = position(body?.x, body?.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height)
+    const coords = position(body?.x, body?.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type)
     const result = await this.db.pool.query(`UPDATE tabletop_tokens SET x=$1,y=$2 WHERE id=$3 AND campaign_id=$4 AND ($5::boolean OR (owner_id=$6 AND layer='geral')) AND scene_id=$7 RETURNING *`, [coords.x, coords.y, tokenId, id, access.master, access.user.id, access.scene.id])
     if (!result.rowCount) throw new ForbiddenException('Você não pode mover este token.')
     return result.rows[0]
