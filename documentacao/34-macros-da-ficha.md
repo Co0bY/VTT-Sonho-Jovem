@@ -20,3 +20,4 @@ Salve o personagem e reabra a ficha para executar as regras durante o preenchime
 - `pnpm --filter @vtt/api build` e `pnpm --filter @vtt/web typecheck` compilaram os contratos da API e da interface. `pnpm --filter @vtt/web test` passou nos 19 testes de geometria.
 - `pnpm --filter @vtt/api test:characters` rejeitou campo inexistente, evento desconhecido, faces fora do intervalo e regras duplicadas.
 - `pnpm --filter @vtt/api test:sheet-browser` arrastou blocos, conferiu ambas as conversões, corrigiu uma regra inválida, salvou e reabriu a ficha. Verificou no chat uma rolagem com 12 dados, uma mensagem literal iniciada por `/roll` e o evento de mudança de um select.
+- `pnpm --filter @vtt/api test:browser` passou na regressão completa da mesa. As suítes de navegador usaram as bibliotecas temporárias do Chromium no WSL, sem `sudo`.
