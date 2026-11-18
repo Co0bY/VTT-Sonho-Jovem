@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import CharacterSheetMacros from './CharacterSheetMacros.vue'
 import { macroMessage, type MacroEvent, type MacroMessage } from '../tabletop/sheet-macros'
 import CharacterSheetEditor from './CharacterSheetEditor.vue'
-import { editableSheet, sheetError } from '../tabletop/character-sheet'
+import { editableSheet, fieldValueError, sheetError } from '../tabletop/character-sheet'
 import CharacterTextEditor from './CharacterTextEditor.vue'
 import { editorHtml } from '../tabletop/rich-text'
 import type { Character, Member } from '../tabletop/types'
@@ -26,7 +26,19 @@ async function runMacro(fieldId:string,event:MacroEvent,value:string){
   macroStatus.value=''
   localError.value=''
   try{
-    await props.sendMacro(macroMessage(rule,value))
+    if(rule.action.kind==='atribuir'){
+      const targetId=rule.action.targetId
+      const target=macroFields.value.find(field=>field.id===targetId)
+      if(!target)return
+      const error=fieldValueError(target,value)
+      if(error)throw new Error(error)
+      sheet.value={...sheet.value,pages:sheet.value.pages.map(page=>{
+        if(!page.fields.some(field=>field.id===targetId))return page
+        return {...page,fields:page.fields.map(field=>field.id===targetId?{...field,value}:field)}
+      })}
+      return
+    }
+    await props.sendMacro(macroMessage(rule.action,value))
     macroStatus.value='Ação enviada ao chat da mesa.'
   }catch(error){
     localError.value=(error as Error).message

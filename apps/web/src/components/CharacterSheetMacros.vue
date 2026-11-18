@@ -10,7 +10,7 @@ const textError=ref('')
 const blockError=ref('')
 const newField=ref('')
 const availableField=computed(()=>props.fields.find(field=>field.id===newField.value)??props.fields[0])
-type Block={kind:'field';id:string}|{kind:'event';event:MacroEvent}|{kind:'action';action:MacroAction}
+type Block={kind:'field';id:string}|{kind:'event';event:MacroEvent}|{kind:'action';action:MacroAction}|{kind:'assignment'}
 let dragged:Block|undefined
 watch(()=>props.fields.map(field=>`${field.id}/${field.reference}`).join(','),()=>{
   if(mode.value==='text'&&!textError.value)source.value=macroText(props.modelValue,props.fields)
@@ -48,6 +48,10 @@ function add(fieldId=availableField.value?.id){
 }
 function update(index:number,patch:Partial<SheetMacro>){
   const updated={...props.modelValue[index]!,...patch}
+  if(updated.action.kind==='atribuir'&&updated.fieldId===updated.action.targetId){
+    blockError.value='O campo de destino deve ser diferente do campo de origem.'
+    return false
+  }
   if(props.modelValue.some((rule,position)=>position!==index&&rule.fieldId===updated.fieldId&&rule.event===updated.event)){
     blockError.value='Já existe uma ação para esse campo e evento.'
     return false
@@ -60,6 +64,17 @@ function changeSlot(index:number,event:Event,slot:'fieldId'|'event'){
   const input=event.target as HTMLSelectElement
   const patch=slot==='fieldId'?{fieldId:input.value}:{event:input.value as MacroEvent}
   if(!update(index,patch))input.value=props.modelValue[index]![slot]
+}
+function assign(index:number){
+  const source=props.modelValue[index]!.fieldId
+  const target=props.fields.find(field=>field.id!==source)
+  if(!target){blockError.value='Adicione outro campo para usar como destino.';return}
+  update(index,{action:{kind:'atribuir',targetId:target.id}})
+}
+function changeAction(index:number,event:Event){
+  const input=event.target as HTMLSelectElement
+  if(input.value==='atribuir')assign(index)
+  else update(index,{action:input.value==='chat'?{kind:'chat'}:{kind:'rolar',sides:6}})
 }
 function groupAction(rule:SheetMacro){
   return rule.action.kind==='rolar'?diceAction(rule.action):null
@@ -136,6 +151,7 @@ function drop(event:DragEvent,index?:number){
   if(block.kind==='field')update(index,{fieldId:block.id})
   if(block.kind==='event')update(index,{event:block.event})
   if(block.kind==='action')update(index,{action:block.action})
+  if(block.kind==='assignment')assign(index)
 }
 </script>
 
@@ -162,6 +178,8 @@ function drop(event:DragEvent,index?:number){
           <span>Ações</span>
           <span class="macro-tile action-tile" :draggable="!disabled" @dragstart="beginDrag($event,{kind:'action',action:{kind:'rolar',sides:6}})">Rolar dados</span>
           <span class="macro-tile action-tile" :draggable="!disabled" @dragstart="beginDrag($event,{kind:'action',action:{kind:'chat'}})">Enviar ao chat</span>
+          <span v-if="fields.length>1" class="macro-tile action-tile" :draggable="!disabled"
+            @dragstart="beginDrag($event,{kind:'assignment'})">Atualizar outro campo</span>
         </div>
       </div>
       <div v-for="(rule,index) in modelValue" :key="index" class="macro-rule" @dragover.prevent @drop.prevent="drop($event,index)">
@@ -180,8 +198,17 @@ function drop(event:DragEvent,index?:number){
           </label>
           <label class="macro-tile action-tile">Faça
             <select :aria-label="`Ação da regra ${index+1}`" :value="rule.action.kind" :disabled="disabled"
-              @change="update(index,{action:($event.target as HTMLSelectElement).value==='chat'?{kind:'chat'}:{kind:'rolar',sides:6}})">
+              @change="changeAction(index,$event)">
               <option value="chat">Enviar ao chat</option><option value="rolar">Rolar dados</option>
+              <option value="atribuir" :disabled="fields.length<2">Atualizar outro campo</option>
+            </select>
+          </label>
+          <label v-if="rule.action.kind==='atribuir'" class="macro-tile action-tile">Campo de destino
+            <select :aria-label="`Destino da regra ${index+1}`" :value="rule.action.targetId" :disabled="disabled"
+              @change="update(index,{action:{kind:'atribuir',targetId:($event.target as HTMLSelectElement).value}})">
+              <option v-for="field in fields.filter(field=>field.id!==rule.fieldId)" :key="field.id" :value="field.id">
+                {{ field.label }} ({{ field.reference }})
+              </option>
             </select>
           </label>
         </div>
@@ -257,6 +284,7 @@ function drop(event:DragEvent,index?:number){
       <p>Escreva uma regra por linha, usando a referência do campo. Eventos válidos: <code>clique</code>, <code>enter</code> e <code>mudanca</code>.</p>
       <pre>quando for clique rolar d6
 quando frase enter chat
+quando for mudanca atribuir bonus
 quando ataque clique rolar 2d20 maior, d6 combinar somar</pre>
     </template>
   </div>

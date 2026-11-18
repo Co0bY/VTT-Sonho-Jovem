@@ -4,13 +4,13 @@ export const reductions={maior:'Maior valor',menor:'Menor valor',somar:'Somar',s
 export type Reduction=keyof typeof reductions
 export type DiceGroup={count:number|null;sides:number;reduction:Reduction|'sucesso'|null;success?:{min:number;max:number}}
 export type DiceAction={kind:'rolar';groups:DiceGroup[];combine:Reduction|null}
-export type MacroAction=DiceAction|{kind:'rolar';sides:number}|{kind:'chat'}
+export type MacroAction=DiceAction|{kind:'rolar';sides:number}|{kind:'chat'}|{kind:'atribuir';targetId:string}
 export type SheetMacro={fieldId:string;event:MacroEvent;action:MacroAction}
 export type MacroField={id:string;reference:string;label:string}
 export type MacroMessage={content:string;literal?:true;dice?:{groups:(Omit<DiceGroup,'count'>&{count:number})[];combine:Reduction|null}}
 export const MAX_DICE_GROUPS=10
 
-export function diceAction(action:Exclude<MacroAction,{kind:'chat'}>):DiceAction {
+export function diceAction(action:Extract<MacroAction,{kind:'rolar'}>):DiceAction {
   return 'groups' in action?action:{kind:'rolar',groups:[{count:null,sides:action.sides,reduction:'somar'}],combine:null}
 }
 
@@ -18,6 +18,10 @@ export function macroText(rules:SheetMacro[],fields:MacroField[]){
   return rules.map(rule=>{
     const reference=fields.find(field=>field.id===rule.fieldId)?.reference
     if(rule.action.kind==='chat')return `quando ${reference} ${rule.event} chat`
+    if(rule.action.kind==='atribuir'){
+      const target=rule.action.targetId
+      return `quando ${reference} ${rule.event} atribuir ${fields.find(field=>field.id===target)?.reference}`
+    }
     const {groups,combine}=diceAction(rule.action)
     const dice=groups.map(group=>{
       const expression=`${group.count??''}d${group.sides}`
@@ -65,7 +69,7 @@ export function parseMacros(text:string,fields:MacroField[]):SheetMacro[]{
     const line=raw.trim()
     if(!line||line.startsWith('#'))continue
     const error=(detail:string)=>new Error(`Linha ${index+1}: ${detail}`)
-    const match=/^quando\s+([a-z][a-z0-9_]*)\s+(clique|enter|mudanca)\s+(chat|rolar\s+(.+))$/.exec(line)
+    const match=/^quando\s+([a-z][a-z0-9_]*)\s+(clique|enter|mudanca)\s+(chat|rolar\s+(.+)|atribuir\s+([a-z][a-z0-9_]*))$/.exec(line)
     if(!match)throw error('use “quando campo clique chat” ou “quando campo enter rolar d6”.')
     const field=fields.find(field=>field.reference===match[1])
     if(!field)throw error(`campo “${match[1]}” não encontrado na ficha.`)
@@ -74,18 +78,24 @@ export function parseMacros(text:string,fields:MacroField[]):SheetMacro[]{
     if(seen.has(key))throw error('já existe uma ação para esse campo e evento.')
     if(rules.length>=100)throw error('a ficha aceita até 100 regras.')
     seen.add(key)
-    rules.push({fieldId:field.id,event,action:match[4]?parseDice(match[4],error):{kind:'chat'}})
+    let action:MacroAction=match[4]?parseDice(match[4],error):{kind:'chat'}
+    if(match[5]){
+      const target=fields.find(item=>item.reference===match[5])
+      if(!target||target.id===field.id)throw error('selecione um campo de destino existente e diferente da origem.')
+      action={kind:'atribuir',targetId:target.id}
+    }
+    rules.push({fieldId:field.id,event,action})
   }
   return rules
 }
 
-export function macroMessage(rule:SheetMacro,value:string):MacroMessage {
+export function macroMessage(action:Exclude<MacroAction,{kind:'atribuir'}>,value:string):MacroMessage {
   const content=value.trim()
-  if(rule.action.kind==='chat'){
+  if(action.kind==='chat'){
     if(!content)throw new Error('Preencha o valor do campo para executar a regra.')
     return {content,literal:true}
   }
-  const {groups,combine}=diceAction(rule.action)
+  const {groups,combine}=diceAction(action)
   const resolved=groups.map(group=>{
     const count=group.count??Number(content)
     if(group.count===null&&(!/^\d+$/.test(content)||count<1||count>50)){

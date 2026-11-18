@@ -138,7 +138,7 @@ function removeField(){
   emit('update:modelValue',{
     ...props.modelValue,
     pages:props.modelValue.pages.map(item=>item.id===page.value.id?{...item,fields:item.fields.filter(field=>field.id!==selectedId.value)}:item),
-    macros:props.modelValue.macros?.filter(rule=>rule.fieldId!==selectedId.value),
+    macros:props.modelValue.macros?.filter(rule=>rule.fieldId!==selectedId.value&&(rule.action.kind!=='atribuir'||rule.action.targetId!==selectedId.value)),
   })
   selectedId.value=''
 }
@@ -283,27 +283,27 @@ defineExpose({finishEditing})
               <span v-if="!field.hideLabel && field.type==='radio'" class="field-label">{{ field.label }}</span>
               <label v-else-if="!field.hideLabel" class="field-label" :for="`sheet-value-${field.id}`">{{ field.label }}</label>
               <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
-                :aria-label="field.label" :value="field.value" :disabled="disabled" :inputmode="field.type==='number'?'decimal':'text'"
+                :aria-label="field.label" :value="field.value" :disabled="disabled" :readonly="field.readOnly" :inputmode="field.type==='number'?'decimal':'text'"
                 :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLInputElement).value})">
               <div v-else-if="field.type==='bar'" class="bar-control">
                 <input :id="`sheet-value-${field.id}`" type="range" min="0" :max="field.maximum" :value="field.value"
                   :style="{'--fill':`${Number(field.value)/field.maximum*100}%`}"
-                  :aria-label="field.label" :aria-valuetext="`${field.value} de ${field.maximum}`" :disabled="disabled" @input="changeBar(field,($event.target as HTMLInputElement).value)">
+                  :aria-label="field.label" :aria-valuetext="`${field.value} de ${field.maximum}`" :disabled="disabled || field.readOnly" @input="changeBar(field,($event.target as HTMLInputElement).value)">
                 <span>{{ field.value }} / {{ field.maximum }}</span>
               </div>
               <select v-else-if="field.type==='select'" :id="`sheet-value-${field.id}`" class="plain-control"
-                :aria-label="field.label" :value="field.value" :disabled="disabled" @change="updateField(field.id,{value:($event.target as HTMLSelectElement).value})">
+                :aria-label="field.label" :value="field.value" :disabled="disabled || field.readOnly" @change="updateField(field.id,{value:($event.target as HTMLSelectElement).value})">
                 <option value="">Selecione</option>
                 <option v-for="(option,index) in field.options" :key="index" :value="option">{{ option }}</option>
               </select>
               <div v-else-if="field.type==='radio'" class="radio-options" role="radiogroup" :aria-label="field.label">
                 <label v-for="(option,index) in field.options" :key="index">
                   <input type="radio" :name="`sheet-radio-${field.id}`" :value="option" :checked="field.value===option"
-                    :disabled="disabled" @change="updateField(field.id,{value:option})"> {{ option }}
+                    :disabled="disabled || field.readOnly" @change="updateField(field.id,{value:option})"> {{ option }}
                 </label>
               </div>
               <input v-else :id="`sheet-value-${field.id}`" type="checkbox" :aria-label="field.label" :checked="field.value==='true'"
-                :disabled="disabled" @change="updateField(field.id,{value:String(($event.target as HTMLInputElement).checked)})">
+                :disabled="disabled || field.readOnly" @change="updateField(field.id,{value:String(($event.target as HTMLInputElement).checked)})">
             </div>
             <button v-if="!editing && clickMacros.has(field.id)" type="button" class="macro-trigger"
               :class="{ 'macro-trigger-left':field.x>=28 && field.x+field.width+28>page.width }"
@@ -334,7 +334,7 @@ defineExpose({finishEditing})
           </select>
         </label>
         <template v-if="selected">
-          <button ref="valueModeButton" type="button" :aria-pressed="editingValue" @click="toggleValueEditing">
+          <button ref="valueModeButton" type="button" :disabled="selected.readOnly" :aria-pressed="editingValue" @click="toggleValueEditing">
             {{ editingValue ? 'Mover campo' : 'Editar valor no campo' }}
           </button>
           <label>Rótulo do campo
@@ -365,6 +365,8 @@ defineExpose({finishEditing})
           <div class="field-flags">
             <label><input type="checkbox" :checked="selected.highlight" @change="updateField(selected.id,{highlight:($event.target as HTMLInputElement).checked})"> Destacar campo</label>
             <label><input type="checkbox" :checked="selected.hideLabel" @change="updateField(selected.id,{hideLabel:($event.target as HTMLInputElement).checked})"> Ocultar rótulo</label>
+            <label><input type="checkbox" :checked="selected.readOnly"
+              @change="editingValue=false;updateField(selected.id,{readOnly:($event.target as HTMLInputElement).checked})"> Somente leitura</label>
           </div>
           <button type="button" @click="removeField">Excluir campo</button>
         </template>

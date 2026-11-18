@@ -55,3 +55,13 @@ O chat exibe todas as faces, a quantidade de sucessos e a quantidade de falhas. 
 A compilação da API, o typecheck, a integração de personagens e o teste de navegador passaram. A integração rejeitou um intervalo que excedia as faces, tanto no salvamento quanto na execução. O navegador verificou a sincronização do intervalo e comparou a contagem exibida no chat com as faces sorteadas.
 
 O teste de navegador confirmou que clicar e digitar no campo não envia a macro de clique. O botão ao lado executa uma vez, desaparece no modo de edição do layout e retorna no preenchimento. A checagem de tipos passou.
+
+## Atualizar outro campo
+
+Em **Configurações da ficha**, escolha o evento **Modificação** e a ação **Atualizar outro campo**. Selecione o destino, que pode estar em outra página. Ao confirmar uma alteração na origem, a regra copia o valor atual para o destino. O valor precisa ser aceito pelo tipo de campo e pelas opções do destino. Uma atualização feita pela regra não inicia outra regra em cadeia.
+
+```text
+quando for mudanca atribuir bonus
+```
+
+Para reservar um campo para a lógica da ficha, selecione-o em **Editar ficha** e marque **Somente leitura**. O preenchimento manual fica bloqueado e as regras continuam podendo atualizar o valor. Use **Salvar personagem** para guardar a configuração e, depois de usar as regras, gravar os valores atualizados.

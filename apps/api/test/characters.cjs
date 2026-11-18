@@ -106,6 +106,11 @@ async function main(){
  const invalidMacro=form('Intervalo inválido',player)
  invalidMacro.append('sheet',JSON.stringify({...sheetV2,macros:[{...macro,action:{kind:'rolar',groups:[invalidRange],combine:null}}]}))
  await request(`${base}/characters/${empty.id}/settings`,400,invalidMacro,1)
+ for(const targetId of [macro.fieldId,randomUUID()]){
+  const invalidAssignment=form('Destino inválido',player)
+  invalidAssignment.append('sheet',JSON.stringify({...sheetV2,macros:[{...macro,event:'mudanca',action:{kind:'atribuir',targetId}}]}))
+  await request(`${base}/characters/${empty.id}/settings`,400,invalidAssignment,1)
+ }
  const removePageImage=form('Remover fundo da segunda',player)
  removePageImage.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],removeBackground:true,backgroundFile:legacyAgain.sheet_background_url.split('/').pop()}]}))
  const remaining=await request(`${base}/characters/${empty.id}/settings`,201,removePageImage,1)
