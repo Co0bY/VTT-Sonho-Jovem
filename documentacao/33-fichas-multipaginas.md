@@ -21,3 +21,4 @@ Para validar, crie duas páginas com imagens distintas, arraste e redimensione u
 - `pnpm --filter @vtt/api test:characters` verificou a atualização de fichas antigas, a autorização de imagens, a remoção isolada de um fundo e a rejeição de valores inválidos.
 - `pnpm --filter @vtt/api test:sheet-browser` verificou upload de dois fundos, movimentação e redimensionamento, destaque, rótulo oculto, preenchimento dos quatro novos tipos e recuperação após falha simulada ao salvar.
 - No Ubuntu (WSL), as bibliotecas ausentes do Chromium do Playwright foram extraídas em diretório temporário e usadas via `LD_LIBRARY_PATH`, sem instalação de pacotes do sistema.
+- `pnpm --filter @vtt/api test:browser` passou na regressão completa da mesa, incluindo criação do personagem pela ficha, arraste por ponteiro, movimento por teclado e reabertura como jogador controlador.
