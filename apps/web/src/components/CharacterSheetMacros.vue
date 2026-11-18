@@ -88,8 +88,26 @@ function editGroupNumber(index:number,groupIndex:number,event:Event,key:'count'|
   const max=key==='count'?50:1000
   const value=Number(input.value)
   if(/^\d+$/.test(input.value)&&value>=min&&value<=max){
-    updateGroup(index,groupIndex,{[key]:value})
+    const group=groupAction(props.modelValue[index]!)?.groups[groupIndex]
+    const success=group?.success
+    if(key==='sides'&&success){
+      updateGroup(index,groupIndex,{sides:value,success:{min:Math.min(success.min,value),max:Math.min(success.max,value)}})
+    }else updateGroup(index,groupIndex,{[key]:value})
   }
+}
+function setGroupResult(index:number,groupIndex:number,group:DiceGroup,event:Event){
+  const operation=(event.target as HTMLSelectElement).value
+  if(operation==='sucesso'){
+    updateGroup(index,groupIndex,{reduction:'sucesso',success:{min:Math.min(4,group.sides),max:group.sides}})
+  }else updateGroup(index,groupIndex,{reduction:(operation||null) as Reduction|null,success:undefined})
+}
+function editSuccessRange(index:number,groupIndex:number,group:DiceGroup,event:Event,key:'min'|'max'){
+  const input=event.target as HTMLInputElement
+  const value=Number(input.value)
+  const range=group.success
+  if(!range||!/^\d+$/.test(input.value)||value<1||value>group.sides)return
+  const success=key==='min'?{min:value,max:Math.max(value,range.max)}:{min:Math.min(value,range.min),max:value}
+  updateGroup(index,groupIndex,{success})
 }
 function restoreGroupNumber(event:Event,value:number){
   const input=event.target as HTMLInputElement
@@ -187,11 +205,22 @@ function drop(event:DragEvent,index?:number){
             </label>
             <label>Resultado dos dados
               <select :aria-label="`Resultado da rolagem ${groupIndex+1}`" :value="group.reduction??''"
-                @change="updateGroup(index,groupIndex,{reduction:(($event.target as HTMLSelectElement).value||null) as Reduction|null})">
+                @change="setGroupResult(index,groupIndex,group,$event)">
                 <option value="" aria-label="Sem cálculo"></option>
+                <option value="sucesso">Definir Sucesso</option>
                 <option v-for="(label,operation) in reductions" :key="operation" :value="operation">{{ label }}</option>
               </select>
             </label>
+            <template v-if="group.reduction==='sucesso' && group.success">
+              <label>Sucesso de
+                <input :aria-label="`Início do sucesso da rolagem ${groupIndex+1}`" inputmode="numeric" :value="group.success.min"
+                  @input="editSuccessRange(index,groupIndex,group,$event,'min')" @change="restoreGroupNumber($event,group.success.min)">
+              </label>
+              <label>Até
+                <input :aria-label="`Fim do sucesso da rolagem ${groupIndex+1}`" inputmode="numeric" :value="group.success.max"
+                  @input="editSuccessRange(index,groupIndex,group,$event,'max')" @change="restoreGroupNumber($event,group.success.max)">
+              </label>
+            </template>
             <button v-if="(groupAction(rule)?.groups.length??0)>1" type="button" :aria-label="`Remover rolagem ${groupIndex+1}`"
               @click="removeGroup(index,groupIndex)">Remover</button>
           </fieldset>

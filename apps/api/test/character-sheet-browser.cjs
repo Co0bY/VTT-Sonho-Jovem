@@ -240,6 +240,33 @@ async function main(){
  await rawGroup.waitFor()
  assert.equal(await rawGroup.locator('.dice-values b').count(),12)
  assert.equal(await rawGroup.locator('footer').count(),0)
+ await page.getByRole('button',{name:'Personagens',exact:true}).click()
+ await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
+ await page.getByRole('tab',{name:'Configurações da ficha',exact:true}).click()
+ await firstRule.getByLabel('Resultado da rolagem 1',{exact:true}).selectOption('sucesso')
+ await firstRule.getByLabel('Início do sucesso da rolagem 1',{exact:true}).fill('3')
+ await page.getByRole('button',{name:'Editor de texto',exact:true}).click()
+ assert.match(await groupedCode.inputValue(),/^quando for clique rolar d6 sucesso 3-6,/)
+ await groupedCode.fill((await groupedCode.inputValue()).replace('sucesso 3-6','sucesso 4-6'))
+ await page.getByRole('button',{name:'Blocos',exact:true}).click()
+ assert.equal(await firstRule.getByLabel('Início do sucesso da rolagem 1',{exact:true}).inputValue(),'4')
+ await page.getByRole('button',{name:'Salvar personagem',exact:true}).click()
+ await page.getByRole('heading',{name:'Editar personagem',exact:true}).waitFor({state:'hidden'})
+ await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
+ await page.getByRole('tab',{name:'Ficha',exact:true}).click()
+ await expectChat(()=>page.getByLabel('Força',{exact:true}).click())
+ const successRoll=(await request('')).messages.at(-1).roll.groups[0]
+ const hits=successRoll.rolls.filter(value=>value>=4&&value<=6).length
+ const misses=successRoll.rolls.length-hits
+ assert.equal(successRoll.rolls.length,12)
+ assert.deepEqual(successRoll.success,{min:4,max:6,hits,misses})
+ await page.getByRole('button',{name:'Cancelar',exact:true}).click()
+ await page.getByRole('button',{name:'Chat',exact:true}).click()
+ const successGroup=page.locator('.dice-group-result').filter({has:page.getByText('12d6 · Sucesso 4–6',{exact:true})})
+ await successGroup.getByText(`${hits} ${hits===1?'sucesso':'sucessos'}`,{exact:true}).waitFor()
+ await successGroup.getByText(`${misses} ${misses===1?'falha':'falhas'}`,{exact:true}).waitFor()
+ assert.equal(await successGroup.locator('.dice-values b').count(),12)
+
 
  assert.deepEqual(errors,[])
  console.log('PASS ficha no navegador: duas páginas, fundos independentes, gesto de arraste, redimensionamento, aparência, novos tipos, recuperação após falha ao salvar, sincronização de macros e execução no chat.')

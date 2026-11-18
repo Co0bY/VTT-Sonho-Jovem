@@ -41,3 +41,15 @@ A checagem de tipos, o build web e a regressão completa da mesa também passara
 O seletor **Resultado dos dados** também aceita uma opção em branco. Ela aparece como `null` no texto, por exemplo `quando for clique rolar 3d6 null`. O chat exibe as três faces sorteadas e deixa o total em branco. Se alguma rolagem estiver assim, os grupos ficam separados. Para combinar, selecione um cálculo em cada grupo.
 
 O teste de navegador confirmou a seleção em branco, a conversão para `null` e de volta aos blocos, a persistência após salvar e a exibição das faces no chat sem total. A compilação da API e a checagem de tipos do web passaram.
+
+### Contagem de sucessos e falhas
+
+No seletor **Resultado dos dados**, escolha **Definir Sucesso** e preencha **Sucesso de** e **Até** com faces válidas do dado. O intervalo inclui as duas pontas. Em um d6 com intervalo de 4 a 6, faces 4, 5 e 6 contam como sucessos e as demais contam como falhas.
+
+```text
+quando for clique rolar 3d6 sucesso 4-6
+```
+
+O chat exibe todas as faces, a quantidade de sucessos e a quantidade de falhas. Se você combinar essa rolagem com outra, a operação usa a quantidade de sucessos como resultado do grupo.
+
+A compilação da API, o typecheck, a integração de personagens e o teste de navegador passaram. A integração rejeitou um intervalo que excedia as faces, tanto no salvamento quanto na execução. O navegador verificou a sincronização do intervalo e comparou a contagem exibida no chat com as faces sorteadas.

@@ -101,6 +101,11 @@ async function main(){
  assert.equal(sum.total,sum.rolls.reduce((a,b)=>a+b))
  assert.equal(separate.total,null)
  await request(`${base}/messages`,400,{content:'/roll d6',dice:{groups:[{count:null,sides:6,reduction:'somar'}],combine:null}},1)
+ const invalidRange={count:3,sides:6,reduction:'sucesso',success:{min:4,max:7}}
+ await request(`${base}/messages`,400,{content:'/roll 3d6',dice:{groups:[invalidRange],combine:null}},1)
+ const invalidMacro=form('Intervalo inválido',player)
+ invalidMacro.append('sheet',JSON.stringify({...sheetV2,macros:[{...macro,action:{kind:'rolar',groups:[invalidRange],combine:null}}]}))
+ await request(`${base}/characters/${empty.id}/settings`,400,invalidMacro,1)
  const removePageImage=form('Remover fundo da segunda',player)
  removePageImage.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],removeBackground:true,backgroundFile:legacyAgain.sheet_background_url.split('/').pop()}]}))
  const remaining=await request(`${base}/characters/${empty.id}/settings`,201,removePageImage,1)
