@@ -36,3 +36,4 @@ quando ataque enter rolar 2d8 multiplicar, 1d4
 `d6` usa o valor do campo. `3d20` lança três dados de vinte faces. O modificador após cada grupo define o cálculo dentro dele, com soma por padrão. `combinar` aplica uma operação aos resultados dos grupos. As regras anteriores, como `quando for clique rolar d6`, continuam funcionando.
 
 A integração verificou subtração, multiplicação e soma reproduzindo os resultados a partir das faces registradas, além da rejeição de uma quantidade sem resolução. O teste focado verificou quantidades fixa e variável no mesmo evento, retorno do maior e menor valor, divisão entre grupos, sincronização com a DSL e exibição no chat.
+A checagem de tipos, o build web e a regressão completa da mesa também passaram. O Vite sinalizou um pacote JavaScript acima de 500 kB após minificação.
