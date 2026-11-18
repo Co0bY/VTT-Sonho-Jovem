@@ -30,3 +30,9 @@ Em **Editar ficha**, clique em **Adicionar campo** e desenhe o retângulo direta
 Clique no campo ou escolha seu nome no seletor **Campo selecionado**. O contorno e o preenchimento violeta indicam a seleção enquanto você edita as propriedades. Arraste pelo centro para mover ou por qualquer canto para ajustar a área. O tamanho mínimo é de 12 × 12 px e o máximo segue os limites da página, o que permite encaixar tanto um atributo como Força quanto uma faixa larga como Tipos de Dano.
 
 O teste focado no navegador desenhou e persistiu um campo de 35 × 22 px e outro com 700 px de largura, confirmou o destaque durante a edição do rótulo e redimensionou a barra por dois cantos opostos. O build, a checagem de tipos, a integração de personagens e a regressão de navegador da mesa também passaram.
+
+## Conferir o valor durante o posicionamento
+
+Selecione um campo e clique em **Editar valor no campo**. Digite ou altere o valor diretamente sobre a imagem, com o campo ainda realçado. Use as alças para ajustar o tamanho e clique em **Mover campo** ou pressione Esc para voltar a ajustar a posição. O valor faz parte do mesmo rascunho e é gravado com **Salvar personagem**.
+
+O teste de navegador digitou um valor dentro do campo no modo de edição, conferiu o realce, retomou o modo de movimentação com Esc e verificou o valor após uma falha simulada, nova tentativa e reabertura.

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { CharacterSheet, FieldType, SheetField, SheetPage } from '../tabletop/character-sheet'
 import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
 
@@ -22,6 +22,9 @@ const preview=ref<Rect>()
 let draw:{pointer:number;x:number;y:number}|undefined
 const pageIndex=ref(0)
 const selectedId=ref('')
+const editingValue=ref(false)
+const valueModeButton=ref<HTMLButtonElement>()
+watch(selectedId,()=>{editingValue.value=false})
 const board=ref<HTMLElement>()
 const viewport=ref<HTMLElement>()
 const backgroundError=ref(false)
@@ -67,6 +70,7 @@ function addField(rect:Rect){
   replacePage({fields:[...page.value.fields,field]})
 }
 async function startPlacement(){
+  editingValue.value=false
   placing.value=true
   await nextTick()
   viewport.value?.focus({preventScroll:true})
@@ -200,7 +204,20 @@ function keyboard(event:KeyboardEvent,field:SheetField,corner?:Corner){
   if(corner)resize(field,delta[0]*step,delta[1]*step,corner)
   else position(field,field.x+delta[0]*step,field.y+delta[1]*step)
 }
-function finishEditing(){editing.value=false;drag=undefined;cancelPlacement()}
+async function toggleValueEditing(){
+  editingValue.value=!editingValue.value
+  if(!editingValue.value)return
+  selectField(selectedId.value)
+  await nextTick()
+  board.value?.querySelector<HTMLElement>('.sheet-field.selected .field-content :is(input,select)')?.focus({preventScroll:true})
+}
+function stopValueEditing(event:KeyboardEvent){
+  if(!editing.value||!editingValue.value)return
+  event.stopPropagation()
+  editingValue.value=false
+  valueModeButton.value?.focus()
+}
+function finishEditing(){editing.value=false;editingValue.value=false;drag=undefined;cancelPlacement()}
 defineExpose({finishEditing})
 </script>
 
@@ -228,6 +245,7 @@ defineExpose({finishEditing})
     </div>
     <p v-if="editing" class="sheet-instruction" aria-live="polite">{{ placing
       ? 'Clique ou arraste sobre a ficha para marcar a área do novo campo. Enter insere com o tamanho padrão.'
+      : editingValue ? 'Altere o valor no campo destacado. Volte a Mover campo para ajustar a posição.'
       : 'Selecione um campo para editar. Arraste pelo centro para mover ou pelos cantos para redimensionar.' }}</p>
     <p v-if="validation" role="alert" class="sheet-error">{{ validation }}</p>
     <p v-if="backgroundError" role="alert" class="sheet-error">Não foi possível carregar o fundo da ficha.</p>
@@ -243,7 +261,7 @@ defineExpose({finishEditing})
           <div v-for="field in page.fields" :key="field.id" class="sheet-field"
             :class="{selected:editing && selectedId===field.id,highlight:field.highlight}"
             :data-sheet-field="field.id" :title="editing ? field.label : undefined" :style="{left:`${field.x}px`,top:`${field.y}px`,width:`${field.width}px`,height:`${field.height}px`,'--field-font':`${clamp(field.height-3,9,14)}px`}">
-            <div class="field-content" :inert="editing">
+            <div class="field-content" :inert="editing && !(editingValue && selectedId===field.id)" @keydown.esc="stopValueEditing">
               <span v-if="!field.hideLabel && field.type==='radio'" class="field-label">{{ field.label }}</span>
               <label v-else-if="!field.hideLabel" class="field-label" :for="`sheet-value-${field.id}`">{{ field.label }}</label>
               <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
@@ -270,7 +288,7 @@ defineExpose({finishEditing})
                 :disabled="disabled" @change="updateField(field.id,{value:String(($event.target as HTMLInputElement).checked)})">
             </div>
             <template v-if="editing">
-              <button type="button" class="move-handle" :disabled="disabled || placing" :aria-label="`Mover campo ${field.label}`"
+              <button v-if="!(editingValue && selectedId===field.id)" type="button" class="move-handle" :disabled="disabled || placing" :aria-label="`Mover campo ${field.label}`"
                 @focus="selectedId=field.id" @click="selectedId=field.id" @keydown="keyboard($event,field)"
                 @pointerdown="down($event,field)" @pointermove="move" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag">
               </button>
@@ -294,6 +312,9 @@ defineExpose({finishEditing})
           </select>
         </label>
         <template v-if="selected">
+          <button ref="valueModeButton" type="button" :aria-pressed="editingValue" @click="toggleValueEditing">
+            {{ editingValue ? 'Mover campo' : 'Editar valor no campo' }}
+          </button>
           <label>Rótulo do campo
             <input :value="selected.label" maxlength="60" @input="updateField(selected.id,{label:($event.target as HTMLInputElement).value})">
           </label>
