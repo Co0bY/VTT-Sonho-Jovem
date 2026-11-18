@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common'
+import { diceGroups } from './tabletop-rules'
 export type SheetField={id:string;label:string;reference:string;type:'text'|'number';x:number;y:number;width:number;value:string}
 export type CharacterSheet={version:1;width:number;height:number;fields:SheetField[]}
 export const emptySheet=():CharacterSheet=>({version:1,width:800,height:1100,fields:[]})
@@ -12,7 +13,7 @@ export type SheetPage = {id:string; width:number; height:number; fields:PageFiel
 type SheetMacro = {
   fieldId:string
   event:'clique'|'enter'|'mudanca'
-  action:{kind:'chat'}|{kind:'rolar';sides:number}
+  action:{kind:'chat'}|{kind:'rolar';sides:number}|({kind:'rolar'} & ReturnType<typeof diceGroups>)
 }
 export type PagedSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]}
 export type StoredSheet = CharacterSheet | PagedSheet
@@ -88,6 +89,7 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
     if(rules.has(key))return invalidMacro()
     rules.add(key)
     if(action.kind==='chat')return {fieldId,event,action:{kind:'chat'}}
+    if(action.kind==='rolar'&&action.groups!==undefined)return {fieldId,event,action:{kind:'rolar',...diceGroups(action,true)}}
     if(action.kind==='rolar'&&inRange(action.sides,2,1000)&&Number.isInteger(action.sides)){
       return {fieldId,event,action:{kind:'rolar',sides:action.sides}}
     }

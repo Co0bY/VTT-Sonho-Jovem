@@ -92,6 +92,15 @@ async function main(){
   update.append('sheet',JSON.stringify({...sheetV2,macros:invalid}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)
  }
+ const groups=[{count:3,sides:6,reduction:'subtrair'},{count:2,sides:8,reduction:'multiplicar'},{count:2,sides:20,reduction:'somar'}]
+ await request(`${base}/messages`,201,{content:'/roll 3d6, 2d8, 2d20',dice:{groups,combine:null}},1)
+ const separate=(await request(base,200,undefined,1)).messages.at(-1).roll
+ const [subtract,multiply,sum]=separate.groups
+ assert.equal(subtract.total,subtract.rolls.reduce((a,b)=>a-b))
+ assert.equal(multiply.total,multiply.rolls.reduce((a,b)=>a*b))
+ assert.equal(sum.total,sum.rolls.reduce((a,b)=>a+b))
+ assert.equal(separate.total,null)
+ await request(`${base}/messages`,400,{content:'/roll d6',dice:{groups:[{count:null,sides:6,reduction:'somar'}],combine:null}},1)
  const removePageImage=form('Remover fundo da segunda',player)
  removePageImage.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],removeBackground:true,backgroundFile:legacyAgain.sheet_background_url.split('/').pop()}]}))
  const remaining=await request(`${base}/characters/${empty.id}/settings`,201,removePageImage,1)

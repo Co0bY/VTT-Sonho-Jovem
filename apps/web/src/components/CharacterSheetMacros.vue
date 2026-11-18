@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { events, macroText, parseMacros, type MacroAction, type MacroEvent, type MacroField, type SheetMacro } from '../tabletop/sheet-macros'
+import { events, diceAction, reductions, MAX_DICE_GROUPS, macroText, parseMacros, type DiceAction, type DiceGroup, type Reduction, type MacroAction, type MacroEvent, type MacroField, type SheetMacro } from '../tabletop/sheet-macros'
 
 const props=defineProps<{modelValue:SheetMacro[];fields:MacroField[];disabled:boolean}>()
 const emit=defineEmits<{'update:modelValue':[rules:SheetMacro[]]}>()
@@ -60,6 +60,38 @@ function changeSlot(index:number,event:Event,slot:'fieldId'|'event'){
   const input=event.target as HTMLSelectElement
   const patch=slot==='fieldId'?{fieldId:input.value}:{event:input.value as MacroEvent}
   if(!update(index,patch))input.value=props.modelValue[index]![slot]
+}
+function groupAction(rule:SheetMacro){
+  return rule.action.kind==='rolar'?diceAction(rule.action):null
+}
+function updateDice(index:number,patch:Partial<DiceAction>){
+  const action=groupAction(props.modelValue[index]!)
+  if(action)update(index,{action:{...action,...patch}})
+}
+function updateGroup(index:number,groupIndex:number,patch:Partial<DiceGroup>){
+  const groups=groupAction(props.modelValue[index]!)?.groups
+  if(groups)updateDice(index,{groups:groups.map((group,position)=>position===groupIndex?{...group,...patch}:group)})
+}
+function addGroup(index:number){
+  const groups=groupAction(props.modelValue[index]!)?.groups
+  if(groups&&groups.length<MAX_DICE_GROUPS)updateDice(index,{groups:[...groups,{count:1,sides:6,reduction:'somar'}]})
+}
+function removeGroup(index:number,groupIndex:number){
+  const groups=groupAction(props.modelValue[index]!)?.groups
+  if(groups&&groups.length>1)updateDice(index,{groups:groups.filter((_,position)=>position!==groupIndex),...(groups.length===2?{combine:null}:{})})
+}
+function editGroupNumber(index:number,groupIndex:number,event:Event,key:'count'|'sides'){
+  const input=event.target as HTMLInputElement
+  const min=key==='count'?1:2
+  const max=key==='count'?50:1000
+  const value=Number(input.value)
+  if(/^\d+$/.test(input.value)&&value>=min&&value<=max){
+    updateGroup(index,groupIndex,{[key]:value})
+  }
+}
+function restoreGroupNumber(event:Event,value:number){
+  const input=event.target as HTMLInputElement
+  input.value=String(value)
 }
 function remove(index:number){
   blockError.value=''
@@ -132,12 +164,45 @@ function drop(event:DragEvent,index?:number){
               <option value="chat">Enviar ao chat</option><option value="rolar">Rolar dados</option>
             </select>
           </label>
-          <label v-if="rule.action.kind==='rolar'" class="macro-tile action-tile">Faces do dado
-            <input :aria-label="`Faces da regra ${index+1}`" inputmode="numeric" :value="rule.action.sides" :disabled="disabled"
-              @change="update(index,{action:{kind:'rolar',sides:Math.round(Math.min(1000,Math.max(2,Number(($event.target as HTMLInputElement).value)||6)))}})">
-          </label>
         </div>
         <button type="button" :aria-label="`Excluir regra ${index+1}`" :disabled="disabled" @click="remove(index)">Excluir</button>
+        <div v-if="groupAction(rule)" class="macro-dice">
+          <fieldset v-for="(group,groupIndex) in groupAction(rule)?.groups" :key="groupIndex" class="dice-group" :disabled="disabled">
+            <legend>Rolagem {{ groupIndex+1 }}</legend>
+            <label>Quantidade de dados
+              <select :aria-label="`Origem da quantidade da rolagem ${groupIndex+1}`" :value="group.count===null?'input':'fixed'"
+                @change="updateGroup(index,groupIndex,{count:($event.target as HTMLSelectElement).value==='input'?null:1})">
+                <option value="input">Valor do input</option><option value="fixed">Definir valor</option>
+              </select>
+            </label>
+            <label v-if="group.count!==null">Dados lançados
+              <input :aria-label="`Dados lançados na rolagem ${groupIndex+1}`" inputmode="numeric" :value="group.count"
+                @input="editGroupNumber(index,groupIndex,$event,'count')" @change="restoreGroupNumber($event,group.count)">
+            </label>
+            <label>Faces do dado
+              <input :aria-label="groupIndex===0?`Faces da regra ${index+1}`:`Faces da rolagem ${groupIndex+1}`" inputmode="numeric" :value="group.sides"
+                @input="editGroupNumber(index,groupIndex,$event,'sides')" @change="restoreGroupNumber($event,group.sides)">
+            </label>
+            <label>Resultado dos dados
+              <select :aria-label="`Resultado da rolagem ${groupIndex+1}`" :value="group.reduction"
+                @change="updateGroup(index,groupIndex,{reduction:($event.target as HTMLSelectElement).value as Reduction})">
+                <option v-for="(label,operation) in reductions" :key="operation" :value="operation">{{ label }}</option>
+              </select>
+            </label>
+            <button v-if="(groupAction(rule)?.groups.length??0)>1" type="button" :aria-label="`Remover rolagem ${groupIndex+1}`"
+              @click="removeGroup(index,groupIndex)">Remover</button>
+          </fieldset>
+          <div class="macro-add">
+            <button type="button" :disabled="disabled || (groupAction(rule)?.groups.length??0)>=MAX_DICE_GROUPS" @click="addGroup(index)">Adicionar rolagem</button>
+            <label v-if="(groupAction(rule)?.groups.length??0)>1">Resultados das rolagens
+              <select aria-label="Combinar resultados das rolagens" :value="groupAction(rule)?.combine??''" :disabled="disabled"
+                @change="updateDice(index,{combine:(($event.target as HTMLSelectElement).value||null) as Reduction|null})">
+                <option value="">Mostrar separados</option>
+                <option v-for="(label,operation) in reductions" :key="operation" :value="operation">{{ label }}</option>
+              </select>
+            </label>
+          </div>
+        </div>
       </div>
       <div class="macro-drop" @dragover.prevent @drop.prevent="drop($event)">
         <span>Solte um campo aqui para criar uma regra. Solte eventos e ações sobre uma regra para alterá-la.</span>
@@ -158,7 +223,8 @@ function drop(event:DragEvent,index?:number){
       <p v-if="textError" class="macro-error" role="alert">{{ textError }}</p>
       <p>Escreva uma regra por linha, usando a referência do campo. Eventos válidos: <code>clique</code>, <code>enter</code> e <code>mudanca</code>.</p>
       <pre>quando for clique rolar d6
-quando frase enter chat</pre>
+quando frase enter chat
+quando ataque clique rolar 2d20 maior, d6 combinar somar</pre>
     </template>
   </div>
 </template>
@@ -178,6 +244,10 @@ quando frase enter chat</pre>
 .macro-rule label{display:grid;gap:4px}
 .macro-rule select,.macro-rule input,.macro-add select{width:auto;max-width:100%;margin:0;padding:5px}
 .macro-rule input{width:84px}
+.macro-dice{display:grid;gap:8px;flex-basis:100%;min-width:0}
+.dice-group{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin:0;padding:8px 10px;min-width:0;border:1px solid #39755f;border-radius:6px;background:#142c27}
+.dice-group legend{padding:0 5px;color:#b9ebd6}
+.dice-group label{color:#e2f3ea;font-size:12px}
 .macro-drop{border:1px dashed #a487b6;border-radius:8px;padding:12px;display:grid;gap:8px;color:#ddc9ed}
 .macro-source textarea{display:block;width:100%;margin-top:6px;padding:10px;background:#181121;color:#f4e9fc;border:1px solid #79548d;border-radius:7px;resize:vertical;font-family:monospace}
 .macro-editor p,.macro-editor pre{margin:0}

@@ -11,7 +11,7 @@ import { MAX_SHEET_BYTES, sheetPageParts } from './character-sheet'
 import { Characters, type CharacterFiles } from './characters'
 import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express'
 import { Mailer } from './mailer'
-import { position, rollDice, integer } from './tabletop-rules'
+import { position, rollDice, rollDiceGroups, integer } from './tabletop-rules'
 
 const characterImageParts = ['appearance','token','sheet',...sheetPageParts].map(name=>({name,maxCount:1}))
 const derive = promisify(scrypt)
@@ -454,10 +454,10 @@ class ApiController {
     this.accounts.mutation(req)
     const access = await this.tableAccess(id, req)
     const content = field(body, 'content', 1, 2000)
-    const literal = (body as {literal?:unknown}).literal === true
-    const command = literal ? null : /^\/(?:roll|r)\s+(.+)$/i.exec(content)
-    if (!literal && content.startsWith('/') && !command) throw new BadRequestException('Comando desconhecido. Use /roll 1d20 ou envie uma mensagem.')
-    const roll = command ? rollDice(command[1]) : null
+    const {literal,dice}=body as {literal?:unknown;dice?:unknown}
+    const command = literal===true ? null : /^\/(?:roll|r)\s+(.+)$/i.exec(content)
+    if (literal!==true && content.startsWith('/') && !command) throw new BadRequestException('Comando desconhecido. Use /roll 1d20 ou envie uma mensagem.')
+    const roll = dice!==undefined ? rollDiceGroups(dice) : command ? rollDice(command[1]) : null
     return (await this.db.pool.query('INSERT INTO tabletop_messages(campaign_id,user_id,content,roll) VALUES($1,$2,$3,$4) RETURNING id::text', [id, access.user.id, content, roll ? JSON.stringify(roll) : null])).rows[0]
   }
   @Post('campaigns/:id/invitations') async invite(@Param('id') id: string, @Req() req: Request) {

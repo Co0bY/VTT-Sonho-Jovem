@@ -21,3 +21,18 @@ Salve o personagem e reabra a ficha para executar as regras durante o preenchime
 - `pnpm --filter @vtt/api test:characters` rejeitou campo inexistente, evento desconhecido, faces fora do intervalo e regras duplicadas.
 - `pnpm --filter @vtt/api test:sheet-browser` arrastou blocos, conferiu ambas as conversões, corrigiu uma regra inválida, salvou e reabriu a ficha. Verificou no chat uma rolagem com 12 dados, uma mensagem literal iniciada por `/roll` e o evento de mudança de um select.
 - `pnpm --filter @vtt/api test:browser` passou na regressão completa da mesa. As suítes de navegador usaram as bibliotecas temporárias do Chromium no WSL, sem `sudo`.
+
+## Várias rolagens e operações
+
+Em uma regra com a ação **Rolar dados**, use **Adicionar rolagem** para configurar outro grupo. Para cada grupo, escolha **Valor do input** ou **Definir valor**, informe as faces do dado e selecione como calcular o resultado dos dados. A quantidade deve estar entre 1 e 50, com 2 a 1.000 faces, em até 10 grupos.
+
+Um grupo pode retornar o maior dado, o menor dado, a soma, a subtração, o produto ou a divisão. Subtração e divisão seguem a ordem em que os dados ou grupos aparecem, começando pelo primeiro. Com mais de um grupo, **Mostrar separados** é o padrão. Se você escolher uma operação entre grupos, o chat também mostra o resultado combinado. O servidor calcula as rolagens e os resultados.
+
+```text
+quando for clique rolar d6 maior, 3d20 menor combinar dividir
+quando ataque enter rolar 2d8 multiplicar, 1d4
+```
+
+`d6` usa o valor do campo. `3d20` lança três dados de vinte faces. O modificador após cada grupo define o cálculo dentro dele, com soma por padrão. `combinar` aplica uma operação aos resultados dos grupos. As regras anteriores, como `quando for clique rolar d6`, continuam funcionando.
+
+A integração verificou subtração, multiplicação e soma reproduzindo os resultados a partir das faces registradas, além da rejeição de uma quantidade sem resolução. O teste focado verificou quantidades fixa e variável no mesmo evento, retorno do maior e menor valor, divisão entre grupos, sincronização com a DSL e exibição no chat.
