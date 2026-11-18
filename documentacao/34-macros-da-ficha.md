@@ -53,3 +53,5 @@ quando for clique rolar 3d6 sucesso 4-6
 O chat exibe todas as faces, a quantidade de sucessos e a quantidade de falhas. Se você combinar essa rolagem com outra, a operação usa a quantidade de sucessos como resultado do grupo.
 
 A compilação da API, o typecheck, a integração de personagens e o teste de navegador passaram. A integração rejeitou um intervalo que excedia as faces, tanto no salvamento quanto na execução. O navegador verificou a sincronização do intervalo e comparou a contagem exibida no chat com as faces sorteadas.
+
+O teste de navegador confirmou que clicar e digitar no campo não envia a macro de clique. O botão ao lado executa uma vez, desaparece no modo de edição do layout e retorna no preenchimento. A checagem de tipos passou.
