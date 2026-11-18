@@ -76,7 +76,7 @@ export class Characters {
         }else if(previous?.sheet_background_file){
           oldBackgrounds.set(FIRST_SHEET_PAGE,previous.sheet_background_file)
         }
-        savedSheet={version:2,pages:sheet.pages.map(({removeBackground,...page},index)=>{
+        savedSheet={...sheet,pages:sheet.pages.map(({removeBackground,...page},index)=>{
           const backgroundFile=saved.find(file=>file.kind===sheetPageParts[index])?.name??(removeBackground?undefined:oldBackgrounds.get(page.id))
           if(backgroundFile===oldBackgrounds.get(page.id))oldBackgrounds.delete(page.id)
           return {...page,backgroundFile}

@@ -454,8 +454,9 @@ class ApiController {
     this.accounts.mutation(req)
     const access = await this.tableAccess(id, req)
     const content = field(body, 'content', 1, 2000)
-    const command = /^\/(?:roll|r)\s+(.+)$/i.exec(content)
-    if (content.startsWith('/') && !command) throw new BadRequestException('Comando desconhecido. Use /roll 1d20 ou envie uma mensagem.')
+    const literal = (body as {literal?:unknown}).literal === true
+    const command = literal ? null : /^\/(?:roll|r)\s+(.+)$/i.exec(content)
+    if (!literal && content.startsWith('/') && !command) throw new BadRequestException('Comando desconhecido. Use /roll 1d20 ou envie uma mensagem.')
     const roll = command ? rollDice(command[1]) : null
     return (await this.db.pool.query('INSERT INTO tabletop_messages(campaign_id,user_id,content,roll) VALUES($1,$2,$3,$4) RETURNING id::text', [id, access.user.id, content, roll ? JSON.stringify(roll) : null])).rows[0]
   }

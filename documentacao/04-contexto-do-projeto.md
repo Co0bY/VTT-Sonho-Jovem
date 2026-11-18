@@ -121,3 +121,7 @@ Salvar personagem encerra o modo de edição da ficha e envia fundo, campos e va
 ## Atualização — ficha com várias páginas
 
 A aba Ficha oferece fundos independentes por página, campos transparentes com destaque e rótulo opcionais, arraste e redimensionamento nas duas direções e campos de barra, lista, radio e checkbox. Consulte `33-fichas-multipaginas.md` para uso e compatibilidade.
+
+## Atualização — macros da ficha
+
+Configurações da ficha oferece edição sincronizada em blocos e texto para associar campos a clique, Enter e modificação. Regras publicam o valor como texto ou usam o valor como quantidade de dados no chat da mesa. Consulte `34-macros-da-ficha.md`.

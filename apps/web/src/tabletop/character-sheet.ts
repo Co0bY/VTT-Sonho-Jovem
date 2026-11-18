@@ -1,3 +1,5 @@
+import type { SheetMacro } from './sheet-macros'
+
 export const MAX_SHEET_PAGES = 5
 const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
 
@@ -11,7 +13,7 @@ export type SheetPage = {
   id:string; width:number; height:number; fields:SheetField[]
   backgroundUrl?:string | null; removeBackground?:boolean
 }
-export type CharacterSheet = {version:2; pages:SheetPage[]}
+export type CharacterSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]}
 type LegacySheet = {
   version:1; width:number; height:number
   fields:Omit<SheetField,'height'|'highlight'|'hideLabel'|'maximum'|'options'>[]

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TabletopBoard from '../components/TabletopBoard.vue'
 import ScenesMenu from '../components/ScenesMenu.vue'
+import type { MacroMessage } from '../tabletop/sheet-macros'
 import CharacterDialog from '../components/CharacterDialog.vue'
 import CharacterCardDialog from '../components/CharacterCardDialog.vue'
 import { editorHtml } from '../tabletop/rich-text'
@@ -95,6 +96,7 @@ async function resizeToken(tokenId:string,rect:Rect){await action(async()=>{awai
 async function removeToken(tokenId: string) { await action(async () => { await api(`${endpoint}/tokens/${tokenId}/remove`, {}); selected.value = '' }) }
 async function removeObject(objectId:string){return action(async()=>{await api(`${endpoint}/objects/${objectId}/remove`,{});selected.value=''})}
 function removeSelected(targetId:string){if(targetId.startsWith('object:'))void removeObject(targetId.slice(7));else void removeToken(targetId)}
+async function sendMacro(message:MacroMessage){return api(`${endpoint}/messages`,message)}
 async function send(content = draft.value) { if (!content.trim()) return; await action(async () => { await api(`${endpoint}/messages`, { content }); if (content === draft.value) draft.value = ''; await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) }) }
 async function createScene(settings: object) {
   let created: Scene | undefined
@@ -141,7 +143,7 @@ onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(
         </aside>
       </div><footer class="table-status"><span><i></i>{{ busy ? 'Salvando…' : error || networkError ? 'Falha de atualização' : 'Alterações salvas no servidor' }}</span><span>Protótipo · atualização a cada 2 s <b>✦ SONHO JOVEM</b></span></footer>
     <CharacterCardDialog :card="presentationCard" :master="master" :busy="busy" :error="presentationError" @close="closeCard" @present="presentCard" />
-    <CharacterDialog :master="master" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" @close="characterDialog=false" />
+    <CharacterDialog :master="master" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
     <ImageTransformDialog :scene="state.scene" :target="transformTarget" :busy="busy" :error="error" :save="transformImage" :remove="removeObject" @close="transformTarget = null" /></template>
   </div>
 </template>

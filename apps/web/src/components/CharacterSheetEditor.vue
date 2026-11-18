@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import type { CharacterSheet, FieldType, SheetField, SheetPage } from '../tabletop/character-sheet'
+import type { MacroEvent } from '../tabletop/sheet-macros'
 import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
 
 const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean}>()
 const emit=defineEmits<{
-  'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string]
+  'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string];trigger:[fieldId:string,event:MacroEvent,value:string]
 }>()
 const editing=ref(false)
 const placing=ref(false)
@@ -54,7 +55,7 @@ function activatePage(index:number){
 function addPage(){
   const pages=props.modelValue.pages
   if(pages.length>=MAX_SHEET_PAGES)return
-  emit('update:modelValue',{version:2,pages:[...pages,emptyPage(crypto.randomUUID())]})
+  emit('update:modelValue',{...props.modelValue,pages:[...pages,emptyPage(crypto.randomUUID())]})
   activatePage(pages.length)
 }
 function addField(rect:Rect){
@@ -134,7 +135,11 @@ function selectField(id:string){
   board.value?.querySelector<HTMLElement>(`[data-sheet-field="${id}"]`)?.scrollIntoView({block:'nearest',inline:'nearest'})
 }
 function removeField(){
-  replacePage({fields:page.value.fields.filter(field=>field.id!==selectedId.value)})
+  emit('update:modelValue',{
+    ...props.modelValue,
+    pages:props.modelValue.pages.map(item=>item.id===page.value.id?{...item,fields:item.fields.filter(field=>field.id!==selectedId.value)}:item),
+    macros:props.modelValue.macros?.filter(rule=>rule.fieldId!==selectedId.value),
+  })
   selectedId.value=''
 }
 function removeBackground(){
@@ -217,6 +222,18 @@ function stopValueEditing(event:KeyboardEvent){
   editingValue.value=false
   valueModeButton.value?.focus()
 }
+function trigger(field:SheetField,event:Event,kind:MacroEvent){
+  const target=event.target
+  if(!(target instanceof HTMLInputElement||target instanceof HTMLSelectElement))return
+  if(event instanceof KeyboardEvent){
+    if(event.isComposing)return
+    if(target instanceof HTMLInputElement&&target.type==='text')event.preventDefault()
+    if(event.repeat)return
+  }
+  if(editing.value||props.disabled)return
+  const value=target instanceof HTMLInputElement&&target.type==='checkbox'?String(target.checked):target.value
+  emit('trigger',field.id,kind,value)
+}
 function finishEditing(){editing.value=false;editingValue.value=false;drag=undefined;cancelPlacement()}
 defineExpose({finishEditing})
 </script>
@@ -261,7 +278,8 @@ defineExpose({finishEditing})
           <div v-for="field in page.fields" :key="field.id" class="sheet-field"
             :class="{selected:editing && selectedId===field.id,highlight:field.highlight}"
             :data-sheet-field="field.id" :title="editing ? field.label : undefined" :style="{left:`${field.x}px`,top:`${field.y}px`,width:`${field.width}px`,height:`${field.height}px`,'--field-font':`${clamp(field.height-3,9,14)}px`}">
-            <div class="field-content" :inert="editing && !(editingValue && selectedId===field.id)" @keydown.esc="stopValueEditing">
+            <div class="field-content" :inert="editing && !(editingValue && selectedId===field.id)" @keydown.esc="stopValueEditing"
+              @click="trigger(field,$event,'clique')" @keydown.enter="trigger(field,$event,'enter')" @change="trigger(field,$event,'mudanca')">
               <span v-if="!field.hideLabel && field.type==='radio'" class="field-label">{{ field.label }}</span>
               <label v-else-if="!field.hideLabel" class="field-label" :for="`sheet-value-${field.id}`">{{ field.label }}</label>
               <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
