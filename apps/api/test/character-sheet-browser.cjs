@@ -172,7 +172,19 @@ async function main(){
   const result=await response
   assert.equal(result.status(),201,await result.text())
  }
- await expectChat(()=>page.getByLabel('Força',{exact:true}).click())
+ const field=page.getByLabel('Força',{exact:true})
+ let macroPosts=0
+ page.on('request',request=>{if(request.url().endsWith('/messages')&&request.method()==='POST')macroPosts++})
+ await field.click()
+ await field.fill('12')
+ assert.equal(await page.getByRole('button',{name:'Executar macro de Força',exact:true}).count(),1)
+ assert.equal(macroPosts,0)
+ await expectChat(()=>page.getByRole('button',{name:'Executar macro de Força',exact:true}).click())
+ assert.equal(macroPosts,1)
+ await page.getByRole('button',{name:'Editar ficha',exact:true}).click()
+ assert.equal(await page.getByRole('button',{name:'Executar macro de Força',exact:true}).count(),0)
+ await page.getByRole('button',{name:'Concluir edição',exact:true}).click()
+
  await page.getByRole('button',{name:'Página 2',exact:true}).click()
  const damage=page.getByLabel('Tipos de dano',{exact:true})
  await damage.fill('/roll 1d20')
@@ -204,7 +216,7 @@ async function main(){
  await page.getByRole('heading',{name:'Editar personagem',exact:true}).waitFor({state:'hidden'})
  await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
  await page.getByRole('tab',{name:'Ficha',exact:true}).click()
- await expectChat(()=>page.getByLabel('Força',{exact:true}).click())
+ await expectChat(()=>page.getByRole('button',{name:'Executar macro de Força',exact:true}).click())
  const groupedRoll=(await request('')).messages.at(-1).roll
  const [firstGroup,secondGroup]=groupedRoll.groups
  assert.deepEqual(groupedRoll.groups.map(group=>[group.expression,group.rolls.length]),[['12d6',12],['3d20',3]])
@@ -228,7 +240,7 @@ async function main(){
  await page.getByRole('heading',{name:'Editar personagem',exact:true}).waitFor({state:'hidden'})
  await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
  await page.getByRole('tab',{name:'Ficha',exact:true}).click()
- await expectChat(()=>page.getByLabel('Força',{exact:true}).click())
+ await expectChat(()=>page.getByRole('button',{name:'Executar macro de Força',exact:true}).click())
  const raw=(await request('')).messages.at(-1).roll
  assert.equal(raw.groups[0].reduction,null)
  assert.equal(raw.groups[0].total,null)
@@ -254,7 +266,7 @@ async function main(){
  await page.getByRole('heading',{name:'Editar personagem',exact:true}).waitFor({state:'hidden'})
  await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
  await page.getByRole('tab',{name:'Ficha',exact:true}).click()
- await expectChat(()=>page.getByLabel('Força',{exact:true}).click())
+ await expectChat(()=>page.getByRole('button',{name:'Executar macro de Força',exact:true}).click())
  const successRoll=(await request('')).messages.at(-1).roll.groups[0]
  const hits=successRoll.rolls.filter(value=>value>=4&&value<=6).length
  const misses=successRoll.rolls.length-hits

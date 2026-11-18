@@ -4,7 +4,7 @@ import type { CharacterSheet, FieldType, SheetField, SheetPage } from '../tablet
 import type { MacroEvent } from '../tabletop/sheet-macros'
 import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
 
-const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean}>()
+const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;clickMacros:ReadonlySet<string>}>()
 const emit=defineEmits<{
   'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string];trigger:[fieldId:string,event:MacroEvent,value:string]
 }>()
@@ -279,7 +279,7 @@ defineExpose({finishEditing})
             :class="{selected:editing && selectedId===field.id,highlight:field.highlight}"
             :data-sheet-field="field.id" :title="editing ? field.label : undefined" :style="{left:`${field.x}px`,top:`${field.y}px`,width:`${field.width}px`,height:`${field.height}px`,'--field-font':`${clamp(field.height-3,9,14)}px`}">
             <div class="field-content" :inert="editing && !(editingValue && selectedId===field.id)" @keydown.esc="stopValueEditing"
-              @click="trigger(field,$event,'clique')" @keydown.enter="trigger(field,$event,'enter')" @change="trigger(field,$event,'mudanca')">
+              @keydown.enter="trigger(field,$event,'enter')" @change="trigger(field,$event,'mudanca')">
               <span v-if="!field.hideLabel && field.type==='radio'" class="field-label">{{ field.label }}</span>
               <label v-else-if="!field.hideLabel" class="field-label" :for="`sheet-value-${field.id}`">{{ field.label }}</label>
               <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
@@ -305,6 +305,10 @@ defineExpose({finishEditing})
               <input v-else :id="`sheet-value-${field.id}`" type="checkbox" :aria-label="field.label" :checked="field.value==='true'"
                 :disabled="disabled" @change="updateField(field.id,{value:String(($event.target as HTMLInputElement).checked)})">
             </div>
+            <button v-if="!editing && clickMacros.has(field.id)" type="button" class="macro-trigger"
+              :class="{ 'macro-trigger-left':field.x>=28 && field.x+field.width+28>page.width }"
+              :disabled="disabled" :aria-label="`Executar macro de ${field.label}`" :title="`Executar macro de ${field.label}`"
+              @click="emit('trigger',field.id,'clique',field.value)"><span aria-hidden="true">▶</span></button>
             <template v-if="editing">
               <button v-if="!(editingValue && selectedId===field.id)" type="button" class="move-handle" :disabled="disabled || placing" :aria-label="`Mover campo ${field.label}`"
                 @focus="selectedId=field.id" @click="selectedId=field.id" @keydown="keyboard($event,field)"
@@ -419,6 +423,13 @@ defineExpose({finishEditing})
 .bar-control input[type=range]::-moz-range-thumb { width:10px; height:10px; border:2px solid #f1e6fc; border-radius:50%; background:#68408c; }
 .radio-options { overflow:auto; scrollbar-width:thin; }
 .radio-options label { display:flex; align-items:center; }
+.sheet-field .macro-trigger {
+  position:absolute; top:50%; left:calc(100% + 4px); z-index:2; transform:translateY(-50%);
+  width:24px; height:24px; display:grid; place-items:center; padding:0; font-size:11px; line-height:1;
+  background:#4e3166; border-color:#d1a7f4; color:#fff;
+}
+.sheet-field .macro-trigger-left { left:auto; right:calc(100% + 4px); }
+.sheet-field .macro-trigger:focus-visible { outline:2px solid #301846; outline-offset:2px; }
 .sheet-field .move-handle { position:absolute; inset:0; width:100%; border:0; padding:0 6px; background:transparent; color:#382449; cursor:grab; touch-action:none; text-align:left; }
 
 .sheet-field .move-handle:active { cursor:grabbing; }

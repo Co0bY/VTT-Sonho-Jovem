@@ -14,10 +14,14 @@ const tab=ref('card'),description=ref(''),notes=ref('')
 const sheet=ref(editableSheet())
 const macroEditor=ref<InstanceType<typeof CharacterSheetMacros>>()
 const macroFields=computed(()=>sheet.value.pages.flatMap(page=>page.fields))
+const savedMacros=computed(()=>{
+  const saved=props.character?.sheet
+  return saved?.version===2?saved.macros??[]:[]
+})
+const clickMacros=computed(()=>new Set(savedMacros.value.filter(rule=>rule.event==='clique').map(rule=>rule.fieldId)))
 const macroStatus=ref('')
 async function runMacro(fieldId:string,event:MacroEvent,value:string){
-  const savedSheet=props.character?.sheet
-  const rule=savedSheet?.version===2?savedSheet.macros?.find(rule=>rule.fieldId===fieldId&&rule.event===event):undefined
+  const rule=savedMacros.value.find(rule=>rule.fieldId===fieldId&&rule.event===event)
   if(!rule)return
   macroStatus.value=''
   localError.value=''
@@ -151,7 +155,7 @@ onBeforeUnmount(()=>{releasePages();for(const kind of kinds)release(kind)})
       <label class="character-color">Cor de identificação<input v-model="color" type="color" :disabled="busy"></label>
       <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
       </section>
-      <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha"><CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" /><p v-if="macroStatus" role="status">{{ macroStatus }}</p></section>
+      <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha"><CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" /><p v-if="macroStatus" role="status">{{ macroStatus }}</p></section>
       <section v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">
         <CharacterTextEditor v-model="notes" label="Anotações" :disabled="busy" />
       </section>

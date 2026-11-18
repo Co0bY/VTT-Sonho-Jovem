@@ -11,7 +11,7 @@ quando frase enter chat
 quando postura mudanca chat
 ```
 
-**Clique** dispara ao clicar no controle. **Enter** usa o valor atual. **Modificação** dispara ao confirmar a alteração, como ao escolher uma opção ou sair de um campo de texto alterado. `rolar d6` usa o número do campo como quantidade de dados, entre 1 e 50. `chat` publica o valor como texto. Há uma ação por combinação de campo e evento, com até 100 regras. Linhas em branco e comentários iniciados com `#` são aceitos. Ao voltar dos blocos para o texto, o editor gera as regras em formato padronizado.
+**Clique** dispara pelo botão ▶ ao lado do campo que tem uma macro salva. Você pode clicar no próprio campo para editar o valor. **Enter** usa o valor atual. **Modificação** dispara ao confirmar a alteração, como ao escolher uma opção ou sair de um campo de texto alterado. `rolar d6` usa o número do campo como quantidade de dados, entre 1 e 50. `chat` publica o valor como texto. Há uma ação por combinação de campo e evento, com até 100 regras. Linhas em branco e comentários iniciados com `#` são aceitos. Ao voltar dos blocos para o texto, o editor gera as regras em formato padronizado.
 
 Salve o personagem e reabra a ficha para executar as regras durante o preenchimento. Os eventos do editor de layout e do preenchimento de prévia do layout não enviam mensagens. A rolagem usa o serviço de dados da mesa, que calcula o resultado no servidor. As regras são guardadas com a ficha e referenciam o ID estável do campo. Renomear uma referência atualiza sua forma textual, e excluir um campo remove suas regras.
 
