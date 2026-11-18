@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, reactive, ref, watch } from 'vue'
 import CharacterSheetEditor from './CharacterSheetEditor.vue'
-import { emptySheet, sheetError } from '../tabletop/character-sheet'
+import { editableSheet, sheetError } from '../tabletop/character-sheet'
 import CharacterTextEditor from './CharacterTextEditor.vue'
 import { editorHtml } from '../tabletop/rich-text'
 import type { Character, Member } from '../tabletop/types'
@@ -9,42 +9,95 @@ const props=defineProps<{open:boolean;master:boolean;character:Character|null;me
 const emit=defineEmits<{close:[]}>()
 const name=ref(''),owner=ref(''),color=ref('#a47ae2'),localError=ref('')
 const tab=ref('card'),description=ref(''),notes=ref('')
-const sheet=ref(emptySheet())
+const sheet=ref(editableSheet())
+const pageUploads=reactive(new Map<string,{file:File;url:string;loading:boolean}>())
+function releasePages(){
+  for(const upload of pageUploads.values())URL.revokeObjectURL(upload.url)
+  pageUploads.clear()
+}
+function removePageUpload(id:string){
+  const upload=pageUploads.get(id)
+  if(upload)URL.revokeObjectURL(upload.url)
+  pageUploads.delete(id)
+}
+async function selectPageImage(id:string,event:Event){
+  const file=readImage(event)
+  if(!file)return
+  removePageUpload(id)
+  const url=URL.createObjectURL(file)
+  pageUploads.set(id,{file,url,loading:true})
+  const image=new Image()
+  image.src=url
+  try{
+    await image.decode()
+    const upload=pageUploads.get(id)
+    if(upload?.url!==url)return
+    sheet.value={...sheet.value,pages:sheet.value.pages.map(page=>{
+      if(page.id!==id)return page
+      const height=Math.max(300,Math.min(4000,Math.round(page.width*image.naturalHeight/image.naturalWidth)))
+      return {...page,height,removeBackground:false,fields:page.fields.map(field=>({
+        ...field,height:Math.min(height,field.height),
+        y:Math.round(Math.max(0,Math.min(height-field.height,field.y*height/page.height))),
+      }))}
+    })}
+    upload.loading=false
+  }catch{
+    if(pageUploads.get(id)?.url!==url)return
+    removePageUpload(id)
+    localError.value='Não foi possível abrir a imagem de fundo da página.'
+  }
+}
+function pageBackground(id:string){
+  const upload=pageUploads.get(id)
+  if(upload&&!upload.loading)return upload.url
+  const page=sheet.value.pages.find(page=>page.id===id)
+  return page?.removeBackground?null:page?.backgroundUrl
+}
 const sheetEditor=ref<InstanceType<typeof CharacterSheetEditor>>()
-const kinds=['appearance','token','sheet'] as const
+const kinds=['appearance','token'] as const
 type Kind=typeof kinds[number]
-const inputs:Record<Kind,HTMLInputElement|null>={appearance:null,token:null,sheet:null}
-const uploads=reactive<Record<Kind,File|null>>({appearance:null,token:null,sheet:null})
-const previews=reactive<Record<Kind,string>>({appearance:'',token:'',sheet:''})
-const removed=reactive<Record<Kind,boolean>>({appearance:false,token:false,sheet:false})
+const inputs:Record<Kind,HTMLInputElement|null>={appearance:null,token:null}
+const uploads=reactive<Record<Kind,File|null>>({appearance:null,token:null})
+const previews=reactive<Record<Kind,string>>({appearance:'',token:''})
+const removed=reactive<Record<Kind,boolean>>({appearance:false,token:false})
 function release(kind:Kind){if(previews[kind].startsWith('blob:'))URL.revokeObjectURL(previews[kind]);previews[kind]=''}
 watch(()=>[props.open,props.character?.id],()=>{
+  releasePages()
   if(!props.open){for(const kind of kinds){release(kind);uploads[kind]=null};return}
-  sheet.value=JSON.parse(JSON.stringify(props.character?.sheet??emptySheet()))
+  sheet.value=editableSheet(props.character?.sheet,props.character?.sheet_background_url)
   tab.value='card';description.value=editorHtml(props.character?.description??'',props.character?.description_format);notes.value=editorHtml(props.character?.notes??'',props.character?.notes_format)
   name.value=props.character?.name??'';owner.value=props.character?.owner_id??props.userId;color.value=props.character?.color??'#a47ae2';localError.value=''
   for(const kind of kinds){release(kind);uploads[kind]=null;removed[kind]=false}
 },{immediate:true})
-function preview(kind:Kind){return previews[kind]||(!removed[kind]?(kind==='sheet'?props.character?.sheet_background_url:kind==='appearance'?props.character?.appearance_url:props.character?.token_url):null)}
-function selectImage(kind:Kind,event:Event){
+function preview(kind:Kind){return previews[kind]||(!removed[kind]?(kind==='appearance'?props.character?.appearance_url:props.character?.token_url):null)}
+function readImage(event:Event){
   const input=event.target as HTMLInputElement,file=input.files?.[0]
   if(!file)return
   if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>10*1024*1024){localError.value='Escolha uma imagem PNG, JPEG ou WebP de até 10 MB.';input.value='';return}
-  localError.value='';release(kind);uploads[kind]=file;removed[kind]=false;previews[kind]=URL.createObjectURL(file)
+  input.value=''
+  localError.value=''
+  return file
+}
+function selectImage(kind:Kind,event:Event){
+  const file=readImage(event)
+  if(!file)return
+  release(kind);uploads[kind]=file;removed[kind]=false;previews[kind]=URL.createObjectURL(file)
 }
 function removeImage(kind:Kind){release(kind);uploads[kind]=null;removed[kind]=true;if(inputs[kind])inputs[kind]!.value=''}
 async function save(){
   localError.value=''
+  if([...pageUploads.values()].some(upload=>upload.loading)){localError.value='Aguarde o carregamento da imagem de fundo.';return}
   if(!name.value.trim()){tab.value='card';localError.value='Informe o nome do personagem.';return}
   if(description.value.length>20000||notes.value.length>20000){localError.value='Use até 20.000 caracteres em cada editor, incluindo formatação.';return}
   const invalidSheet=sheetError(sheet.value)
   if(invalidSheet){tab.value='sheet';localError.value=invalidSheet;return}
   sheetEditor.value?.finishEditing()
-  const data=new FormData();data.append('sheet',JSON.stringify(sheet.value));data.append('text_format','html');data.append('name',name.value);if(props.master)data.append('owner_id',owner.value);data.append('color',color.value);data.append('description',description.value);data.append('notes',notes.value)
+  const data=new FormData();data.append('sheet',JSON.stringify({version:2,pages:sheet.value.pages.map(({backgroundUrl,...page})=>page)}));data.append('text_format','html');data.append('name',name.value);if(props.master)data.append('owner_id',owner.value);data.append('color',color.value);data.append('description',description.value);data.append('notes',notes.value)
   for(const kind of kinds){if(uploads[kind])data.append(kind,uploads[kind]!);if(removed[kind])data.append(`remove_${kind}`,'true')}
+  sheet.value.pages.forEach((page,index)=>{const upload=pageUploads.get(page.id);if(upload)data.append(`sheet_page_${index}`,upload.file)})
   if(await props.save(props.character?.id??null,data))emit('close')
 }
-onBeforeUnmount(()=>{for(const kind of kinds)release(kind)})
+onBeforeUnmount(()=>{releasePages();for(const kind of kinds)release(kind)})
 </script>
 <template>
   <q-dialog :model-value="open" :persistent="busy" @update:model-value="emit('close')"><q-card class="modal character-dialog" :class="{'character-dialog-sheet':tab==='sheet'}"><q-card-section>
@@ -69,7 +122,7 @@ onBeforeUnmount(()=>{for(const kind of kinds)release(kind)})
       <label class="character-color">Cor de identificação<input v-model="color" type="color" :disabled="busy"></label>
       <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
       </section>
-      <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha"><CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background="preview('sheet')" :disabled="busy" @background="selectImage('sheet',$event)" @remove-background="removeImage('sheet')" /></section>
+      <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha"><CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" /></section>
       <section v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">
         <CharacterTextEditor v-model="notes" label="Anotações" :disabled="busy" />
       </section>

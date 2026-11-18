@@ -117,3 +117,7 @@ A aba Ficha permite enviar um fundo e adicionar inputs posicionáveis, com rótu
 ## Atualização — salvamento da ficha em edição
 
 Salvar personagem encerra o modo de edição da ficha e envia fundo, campos e valores, preservando os dados se a requisição falhar. O servidor de desenvolvimento passa a usar `--no-shell` para evitar uma API antiga órfã ocupando a porta após recarga. O ambiente foi reconstruído e um teste contra a aplicação publicada valida o envio `sheet`. Consulte `32-salvar-ficha-e-recarga-da-api.md`.
+
+## Atualização — ficha com várias páginas
+
+A aba Ficha oferece fundos independentes por página, campos transparentes com destaque e rótulo opcionais, arraste e redimensionamento nas duas direções e campos de barra, lista, radio e checkbox. Consulte `33-fichas-multipaginas.md` para uso e compatibilidade.
