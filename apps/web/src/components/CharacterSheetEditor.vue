@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import type { CharacterSheet, FieldType, SheetField, SheetPage } from '../tabletop/character-sheet'
 import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
 
@@ -8,6 +8,18 @@ const emit=defineEmits<{
   'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string]
 }>()
 const editing=ref(false)
+const placing=ref(false)
+type Rect=Pick<SheetField,'x'|'y'|'width'|'height'>
+type Corner={name:string;left:boolean;top:boolean}
+const corners:Corner[]=[
+  {name:'superior esquerdo',left:true,top:true},
+  {name:'superior direito',left:false,top:true},
+  {name:'inferior esquerdo',left:true,top:false},
+  {name:'inferior direito',left:false,top:false},
+]
+const minimumSize=12
+const preview=ref<Rect>()
+let draw:{pointer:number;x:number;y:number}|undefined
 const pageIndex=ref(0)
 const selectedId=ref('')
 const board=ref<HTMLElement>()
@@ -20,7 +32,7 @@ const fieldCount=computed(()=>props.modelValue.pages.reduce((count,item)=>count+
 const validation=computed(()=>sheetError(props.modelValue))
 const types:Record<FieldType,string>={text:'Texto',number:'Número',bar:'Barra',select:'Lista (select)',radio:'Opção única (radio)',checkbox:'Caixa de seleção (checkbox)'}
 const clamp=(value:number,min:number,max:number)=>Math.round(Math.max(min,Math.min(max,Number.isNaN(value)?min:value)))
-let drag:{pointer:number;field:SheetField;clientX:number;clientY:number;resize:boolean}|undefined
+let drag:{pointer:number;field:SheetField;clientX:number;clientY:number;corner?:Corner}|undefined
 
 function replacePage(patch:Partial<SheetPage>){
   emit('update:modelValue',{...props.modelValue,pages:props.modelValue.pages.map(item=>item.id===page.value.id?{...item,...patch}:item)})
@@ -29,6 +41,7 @@ function updateField(id:string,patch:Partial<SheetField>){
   replacePage({fields:page.value.fields.map(field=>field.id===id?{...field,...patch}:field)})
 }
 function activatePage(index:number){
+  cancelPlacement()
   drag=undefined
   selectedId.value=''
   backgroundError.value=false
@@ -41,18 +54,80 @@ function addPage(){
   emit('update:modelValue',{version:2,pages:[...pages,emptyPage(crypto.randomUUID())]})
   activatePage(pages.length)
 }
-function addField(){
+function addField(rect:Rect){
   if(fieldCount.value>=100)return
   const references=new Set(props.modelValue.pages.flatMap(item=>item.fields.map(field=>field.reference)))
   let index=1
   while(references.has(`campo_${index}`))index++
   const field:SheetField={
     ...fieldDefaults(),id:crypto.randomUUID(),label:`Campo ${index}`,reference:`campo_${index}`,
-    type:'text',x:clamp((viewport.value?.scrollLeft??0)+24,0,page.value.width-200),
-    y:clamp((viewport.value?.scrollTop??0)+24,0,page.value.height-64),width:200,value:'',
+    ...rect,type:'text',hideLabel:!!background.value,value:'',
   }
   selectedId.value=field.id
   replacePage({fields:[...page.value.fields,field]})
+}
+async function startPlacement(){
+  placing.value=true
+  await nextTick()
+  viewport.value?.focus()
+}
+function cancelPlacement(){
+  placing.value=false
+  preview.value=undefined
+  draw=undefined
+}
+function boardPoint(event:PointerEvent){
+  const bounds=board.value!.getBoundingClientRect()
+  return {
+    x:clamp((event.clientX-bounds.left)*page.value.width/bounds.width,0,page.value.width),
+    y:clamp((event.clientY-bounds.top)*page.value.height/bounds.height,0,page.value.height),
+  }
+}
+function fieldRect(x:number,y:number,width:number,height:number):Rect{
+  x=clamp(x,0,page.value.width-minimumSize)
+  y=clamp(y,0,page.value.height-minimumSize)
+  return {x,y,width:clamp(width,minimumSize,page.value.width-x),height:clamp(height,minimumSize,page.value.height-y)}
+}
+function startDraw(event:PointerEvent){
+  if(!placing.value||props.disabled||event.button!==0||draw)return
+  event.preventDefault()
+  const {x,y}=boardPoint(event)
+  draw={pointer:event.pointerId,x,y}
+  preview.value=fieldRect(x,y,minimumSize,minimumSize)
+  board.value!.setPointerCapture(event.pointerId)
+}
+function drawMove(event:PointerEvent){
+  if(!draw||draw.pointer!==event.pointerId)return
+  const {x,y}=boardPoint(event)
+  preview.value=fieldRect(Math.min(x,draw.x),Math.min(y,draw.y),Math.abs(x-draw.x),Math.abs(y-draw.y))
+}
+function finishDraw(event:PointerEvent){
+  if(!draw||draw.pointer!==event.pointerId)return
+  if(event.type==='pointerup'&&!props.disabled){
+    const point=boardPoint(event)
+    drawMove(event)
+    const clicked=Math.abs(point.x-draw.x)<4&&Math.abs(point.y-draw.y)<4
+    addField(clicked?fieldRect(draw.x,draw.y,120,24):preview.value!)
+  }
+  cancelPlacement()
+}
+function placementKey(event:KeyboardEvent){
+  if(!placing.value)return
+  if(event.key==='Escape'){
+    event.preventDefault()
+    event.stopPropagation()
+    cancelPlacement()
+  }
+  if(event.key==='Enter'){
+    event.preventDefault()
+    if(props.disabled)return
+    addField(fieldRect((viewport.value?.scrollLeft??0)+24,(viewport.value?.scrollTop??0)+24,120,24))
+    cancelPlacement()
+  }
+}
+function selectField(id:string){
+  selectedId.value=id
+  board.value?.querySelector<HTMLElement>(`[data-sheet-field="${id}"]`)?.scrollIntoView({block:'nearest',inline:'nearest'})
 }
 function removeField(){
   replacePage({fields:page.value.fields.filter(field=>field.id!==selectedId.value)})
@@ -67,8 +142,7 @@ function changeType(field:SheetField,type:FieldType){
   const options=hasOptions(type)&&!field.options.length?['Opção 1','Opção 2']:field.options
   const previousText=field.type==='text'||field.type==='number'?field.value:''
   const value=type==='checkbox'?'false':type==='bar'?'0':hasOptions(type)?'':previousText
-  const height=type==='radio'?Math.max(field.height,104):field.height
-  updateField(field.id,{type,value,options,height,y:Math.min(field.y,page.value.height-height)})
+  updateField(field.id,{type,value,options})
 }
 function changeOptions(field:SheetField,text:string){
   const options=text.split('\n').map(option=>option.trim()).filter(Boolean)
@@ -79,21 +153,24 @@ function changeBar(field:SheetField,raw:string,changeMaximum=false){
   const value=clamp(Number(changeMaximum?field.value:raw)||0,0,maximum)
   updateField(field.id,{maximum,value:String(value)})
 }
-function resize(field:SheetField,width:number,height:number){
-  updateField(field.id,{
-    width:clamp(width,80,Math.min(600,page.value.width-field.x)),
-    height:clamp(height,48,Math.min(600,page.value.height-field.y)),
-  })
+function resize(field:SheetField,dx:number,dy:number,corner:Corner){
+  const right=field.x+field.width
+  const bottom=field.y+field.height
+  const x=corner.left?clamp(field.x+dx,0,right-minimumSize):field.x
+  const y=corner.top?clamp(field.y+dy,0,bottom-minimumSize):field.y
+  const width=corner.left?right-x:clamp(field.width+dx,minimumSize,page.value.width-x)
+  const height=corner.top?bottom-y:clamp(field.height+dy,minimumSize,page.value.height-y)
+  updateField(field.id,{x,y,width,height})
 }
 function position(field:SheetField,x:number,y:number){
   updateField(field.id,{x:clamp(x,0,page.value.width-field.width),y:clamp(y,0,page.value.height-field.height)})
 }
-function down(event:PointerEvent,field:SheetField,resizeField=false){
-  if(!editing.value||props.disabled||event.button!==0||drag)return
+function down(event:PointerEvent,field:SheetField,corner?:Corner){
+  if(!editing.value||placing.value||props.disabled||event.button!==0||drag)return
   selectedId.value=field.id
   const target=event.currentTarget as HTMLElement
   target.setPointerCapture(event.pointerId)
-  drag={pointer:event.pointerId,field,clientX:event.clientX,clientY:event.clientY,resize:resizeField}
+  drag={pointer:event.pointerId,field,clientX:event.clientX,clientY:event.clientY,corner}
 }
 function move(event:PointerEvent){
   if(!drag||drag.pointer!==event.pointerId||!board.value||props.disabled)return
@@ -101,7 +178,7 @@ function move(event:PointerEvent){
   const dx=(event.clientX-drag.clientX)*page.value.width/bounds.width
   const dy=(event.clientY-drag.clientY)*page.value.height/bounds.height
   const field=drag.field
-  if(drag.resize)resize(field,field.width+dx,field.height+dy)
+  if(drag.corner)resize(field,dx,dy,drag.corner)
   else position(field,field.x+dx,field.y+dy)
 }
 function endDrag(event:PointerEvent){
@@ -112,7 +189,7 @@ function endDrag(event:PointerEvent){
   }
   drag=undefined
 }
-function keyboard(event:KeyboardEvent,field:SheetField,resizeField=false){
+function keyboard(event:KeyboardEvent,field:SheetField,corner?:Corner){
   const directions:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}
   const delta=directions[event.key]
   if(!delta)return
@@ -120,10 +197,10 @@ function keyboard(event:KeyboardEvent,field:SheetField,resizeField=false){
   event.stopPropagation()
   selectedId.value=field.id
   const step=event.shiftKey?10:1
-  if(resizeField)resize(field,field.width+delta[0]*step,field.height+delta[1]*step)
+  if(corner)resize(field,delta[0]*step,delta[1]*step,corner)
   else position(field,field.x+delta[0]*step,field.y+delta[1]*step)
 }
-function finishEditing(){editing.value=false;drag=undefined}
+function finishEditing(){editing.value=false;drag=undefined;cancelPlacement()}
 defineExpose({finishEditing})
 </script>
 
@@ -147,23 +224,29 @@ defineExpose({finishEditing})
           @change="backgroundError=false;emit('background',page.id,$event)">
       </label>
       <button v-if="background" type="button" :disabled="disabled" @click="removeBackground">Remover fundo da ficha</button>
-      <button type="button" :disabled="disabled || fieldCount>=100" @click="addField">+ Adicionar campo</button>
+      <button type="button" :disabled="disabled || fieldCount>=100" :aria-pressed="placing" @click="placing ? cancelPlacement() : startPlacement()">{{ placing ? 'Cancelar adição' : '+ Adicionar campo' }}</button>
     </div>
+    <p v-if="editing" class="sheet-instruction" aria-live="polite">{{ placing
+      ? 'Clique ou arraste sobre a ficha para marcar a área do novo campo. Enter insere com o tamanho padrão.'
+      : 'Selecione um campo para editar. Arraste pelo centro para mover ou pelos cantos para redimensionar.' }}</p>
     <p v-if="validation" role="alert" class="sheet-error">{{ validation }}</p>
     <p v-if="backgroundError" role="alert" class="sheet-error">Não foi possível carregar o fundo da ficha.</p>
     <div class="sheet-workspace" :class="{ 'show-settings':editing }">
-      <div ref="viewport" class="sheet-viewport" tabindex="0" aria-label="Área da ficha">
-        <div :key="page.id" ref="board" class="sheet-board" :class="{'is-editing':editing}" :style="{width:`${page.width}px`,height:`${page.height}px`}">
+      <div ref="viewport" class="sheet-viewport" tabindex="0" aria-label="Área da ficha" @keydown="placementKey">
+        <div :key="page.id" ref="board" class="sheet-board" :class="{'is-editing':editing,'is-placing':placing}"
+          @pointerdown="startDraw" @pointermove="drawMove" @pointerup="finishDraw" @pointercancel="finishDraw" @lostpointercapture="finishDraw"
+          :style="{width:`${page.width}px`,height:`${page.height}px`}">
           <img v-if="background" :key="background" class="sheet-background" :src="background" alt="Fundo da ficha"
             draggable="false" @load="backgroundError=false" @error="backgroundError=true">
           <p v-if="!page.fields.length && !background" class="sheet-empty">Edite a ficha para adicionar um fundo ou campos a esta página.</p>
+          <div v-if="preview" class="draw-preview" :style="{left:`${preview.x}px`,top:`${preview.y}px`,width:`${preview.width}px`,height:`${preview.height}px`}"></div>
           <div v-for="field in page.fields" :key="field.id" class="sheet-field"
             :class="{selected:editing && selectedId===field.id,highlight:field.highlight}"
-            :data-sheet-field="field.id" :style="{left:`${field.x}px`,top:`${field.y}px`,width:`${field.width}px`,height:`${field.height}px`}">
+            :data-sheet-field="field.id" :title="editing ? field.label : undefined" :style="{left:`${field.x}px`,top:`${field.y}px`,width:`${field.width}px`,height:`${field.height}px`,'--field-font':`${clamp(field.height-3,9,14)}px`}">
             <div class="field-content" :inert="editing">
               <span v-if="!field.hideLabel && field.type==='radio'" class="field-label">{{ field.label }}</span>
               <label v-else-if="!field.hideLabel" class="field-label" :for="`sheet-value-${field.id}`">{{ field.label }}</label>
-              <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control"
+              <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
                 :aria-label="field.label" :value="field.value" :disabled="disabled" :inputmode="field.type==='number'?'decimal':'text'"
                 :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLInputElement).value})">
               <div v-else-if="field.type==='bar'" class="bar-control">
@@ -187,53 +270,63 @@ defineExpose({finishEditing})
                 :disabled="disabled" @change="updateField(field.id,{value:String(($event.target as HTMLInputElement).checked)})">
             </div>
             <template v-if="editing">
-              <button type="button" class="move-handle" :disabled="disabled" :aria-label="`Mover campo ${field.label}`"
+              <button type="button" class="move-handle" :disabled="disabled || placing" :aria-label="`Mover campo ${field.label}`"
                 @focus="selectedId=field.id" @click="selectedId=field.id" @keydown="keyboard($event,field)"
                 @pointerdown="down($event,field)" @pointermove="move" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag">
-                <span v-if="field.hideLabel">{{ field.label }}</span>
               </button>
-              <button v-if="selectedId===field.id" type="button" class="resize-handle" :disabled="disabled" :aria-label="`Redimensionar campo ${field.label}`"
-                @keydown="keyboard($event,field,true)" @pointerdown="down($event,field,true)" @pointermove="move" @pointerup="endDrag"
-                @pointercancel="endDrag" @lostpointercapture="endDrag"><span aria-hidden="true">↘</span></button>
+              <template v-if="selectedId===field.id && !placing">
+                <button v-for="corner in corners" :key="corner.name" type="button" class="resize-handle"
+                  :disabled="disabled" :class="{left:corner.left,top:corner.top}"
+                  :aria-label="`Redimensionar campo ${field.label} pelo canto ${corner.name}`"
+                  @keydown="keyboard($event,field,corner)" @pointerdown="down($event,field,corner)"
+                  @pointermove="move" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag"></button>
+              </template>
             </template>
           </div>
         </div>
       </div>
-      <fieldset v-if="editing && selected" class="field-settings" :disabled="disabled">
-        <legend>Editar campo</legend>
-        <label>Rótulo do campo
-          <input :value="selected.label" maxlength="60" @input="updateField(selected.id,{label:($event.target as HTMLInputElement).value})">
-        </label>
-        <label>Referência do campo
-          <input :value="selected.reference" maxlength="64" placeholder="Ex. for" autocapitalize="none" spellcheck="false"
-            @input="updateField(selected.id,{reference:($event.target as HTMLInputElement).value})">
-        </label>
-        <label>Tipo do campo
-          <select aria-label="Tipo do campo" :value="selected.type" @change="changeType(selected,($event.target as HTMLSelectElement).value as FieldType)">
-            <option v-for="(label,type) in types" :key="type" :value="type">{{ label }}</option>
+      <fieldset v-if="editing" class="field-settings" :disabled="disabled || placing">
+        <legend>Propriedades do campo</legend>
+        <label v-if="page.fields.length">Campo selecionado
+          <select :value="selectedId" @change="selectField(($event.target as HTMLSelectElement).value)">
+            <option value="">Selecione um campo</option>
+            <option v-for="field in page.fields" :key="field.id" :value="field.id">{{ field.label }} ({{ field.reference }})</option>
           </select>
         </label>
-        <label v-if="selected.type==='bar'">Máximo da barra
-          <input inputmode="numeric" :value="selected.maximum" @change="changeBar(selected,($event.target as HTMLInputElement).value,true)">
-        </label>
-        <label v-if="hasOptions(selected.type)" class="option-settings">Opções (uma por linha)
-          <textarea :key="selected.id" :value="selected.options.join('\n')" rows="3" maxlength="1220"
-            @change="changeOptions(selected,($event.target as HTMLTextAreaElement).value)"></textarea>
-        </label>
-        <label>Largura do campo
-          <input inputmode="numeric" :value="selected.width" @change="resize(selected,Number(($event.target as HTMLInputElement).value),selected.height)">
-        </label>
-        <label>Altura do campo
-          <input inputmode="numeric" :value="selected.height" @change="resize(selected,selected.width,Number(($event.target as HTMLInputElement).value))">
-        </label>
-        <div class="field-flags">
-          <label><input type="checkbox" :checked="selected.highlight" @change="updateField(selected.id,{highlight:($event.target as HTMLInputElement).checked})"> Destacar campo</label>
-          <label><input type="checkbox" :checked="selected.hideLabel" @change="updateField(selected.id,{hideLabel:($event.target as HTMLInputElement).checked})"> Ocultar rótulo</label>
-        </div>
-        <button type="button" @click="removeField">Excluir campo</button>
+        <template v-if="selected">
+          <label>Rótulo do campo
+            <input :value="selected.label" maxlength="60" @input="updateField(selected.id,{label:($event.target as HTMLInputElement).value})">
+          </label>
+          <label>Referência do campo
+            <input :value="selected.reference" maxlength="64" placeholder="Ex. for" autocapitalize="none" spellcheck="false"
+              @input="updateField(selected.id,{reference:($event.target as HTMLInputElement).value})">
+          </label>
+          <label>Tipo do campo
+            <select aria-label="Tipo do campo" :value="selected.type" @change="changeType(selected,($event.target as HTMLSelectElement).value as FieldType)">
+              <option v-for="(label,type) in types" :key="type" :value="type">{{ label }}</option>
+            </select>
+          </label>
+          <label v-if="selected.type==='bar'">Máximo da barra
+            <input inputmode="numeric" :value="selected.maximum" @change="changeBar(selected,($event.target as HTMLInputElement).value,true)">
+          </label>
+          <label v-if="hasOptions(selected.type)" class="option-settings">Opções (uma por linha)
+            <textarea :key="selected.id" :value="selected.options.join('\n')" rows="3" maxlength="1220"
+              @change="changeOptions(selected,($event.target as HTMLTextAreaElement).value)"></textarea>
+          </label>
+          <label>Largura do campo
+            <input inputmode="numeric" :value="selected.width" @change="updateField(selected.id,fieldRect(selected.x,selected.y,Number(($event.target as HTMLInputElement).value),selected.height))">
+          </label>
+          <label>Altura do campo
+            <input inputmode="numeric" :value="selected.height" @change="updateField(selected.id,fieldRect(selected.x,selected.y,selected.width,Number(($event.target as HTMLInputElement).value)))">
+          </label>
+          <div class="field-flags">
+            <label><input type="checkbox" :checked="selected.highlight" @change="updateField(selected.id,{highlight:($event.target as HTMLInputElement).checked})"> Destacar campo</label>
+            <label><input type="checkbox" :checked="selected.hideLabel" @change="updateField(selected.id,{hideLabel:($event.target as HTMLInputElement).checked})"> Ocultar rótulo</label>
+          </div>
+          <button type="button" @click="removeField">Excluir campo</button>
+        </template>
       </fieldset>
     </div>
-    <small v-if="editing">Arraste o campo para mover e use o canto inferior direito para mudar largura e altura. As setas também funcionam nas alças.</small>
   </div>
 </template>
 
@@ -244,7 +337,7 @@ defineExpose({finishEditing})
 .sheet-editor button { border:1px solid #79548d; border-radius:6px; background:#3b2849; color:#eadff3; padding:7px 10px; font-size:12px; cursor:pointer; }
 .sheet-editor button[aria-current="page"] { background:#65447c; border-color:#c49de5; }
 .sheet-editor button:disabled { opacity:.55; cursor:default; }
-.sheet-editor small { display:block; margin-top:10px; color:#cbb4db; }
+.sheet-instruction { margin:0 0 8px; font-size:12px; color:#dfcaee; }
 .sheet-tools label { margin:0; font-size:12px; min-width:0; }
 .sheet-tools input { max-width:100%; }
 .field-settings { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,145px),1fr)); align-items:end; gap:8px 12px; padding:10px; min-width:0; border:1px solid #59436a; border-radius:8px; }
@@ -267,11 +360,15 @@ defineExpose({finishEditing})
 .sheet-field { position:absolute; border-radius:4px; color:#211729; }
 .sheet-field.highlight { background:#ffffffe8; box-shadow:inset 0 0 0 1px #8f8298; }
 .is-editing .sheet-field { outline:1px dashed #79548d; }
-.is-editing .sheet-field.selected { outline:2px solid #8e54ba; z-index:1; }
-.field-content { height:100%; display:flex; flex-direction:column; gap:2px; padding:3px 6px; overflow:auto; }
+.is-editing .sheet-field.selected { outline:2px solid #6e349e; background:#d5a3ff65; box-shadow:inset 0 0 0 1px #fff; z-index:1; }
+.is-placing { cursor:crosshair; touch-action:none; }
+.is-placing .sheet-field, .sheet-empty { pointer-events:none; }
+.draw-preview { position:absolute; z-index:2; pointer-events:none; border:2px solid #6e349e; background:#d5a3ff65; }
+.field-content { height:100%; display:flex; flex-direction:column; gap:0; padding:0 2px; overflow:hidden; }
 .field-content label { margin:0; color:inherit; font-size:12px; }
 .field-label { font-size:12px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:none; }
-.field-content .plain-control { width:100%; min-height:24px; flex:1; margin:0; padding:0 2px; border:1px solid transparent; background:transparent; color:inherit; }
+.field-content .plain-control { width:100%; min-height:0; flex:1; margin:0; padding:0 1px; font-size:var(--field-font,14px); line-height:1; border:1px solid transparent; background:transparent; color:inherit; }
+.field-content .number-control { text-align:center; }
 .field-content .plain-control:focus { outline:1px solid #68408c; border-color:#68408c; }
 .field-content select option { background:#fff; color:#211729; }
 .field-content input[type=checkbox], .field-content input[type=radio] { width:auto; align-self:start; margin:2px; accent-color:#68408c; }
@@ -281,10 +378,14 @@ defineExpose({finishEditing})
 .bar-control input[type=range]::-moz-range-track { height:8px; border-radius:8px; background:linear-gradient(to right,#68408c var(--fill),#cfc1da var(--fill)); }
 .bar-control input[type=range]::-webkit-slider-thumb { appearance:none; width:14px; height:14px; margin-top:-3px; border:2px solid #f1e6fc; border-radius:50%; background:#68408c; }
 .bar-control input[type=range]::-moz-range-thumb { width:10px; height:10px; border:2px solid #f1e6fc; border-radius:50%; background:#68408c; }
+.radio-options { overflow:auto; scrollbar-width:thin; }
 .radio-options label { display:flex; align-items:center; }
 .sheet-field .move-handle { position:absolute; inset:0; width:100%; border:0; padding:0 6px; background:transparent; color:#382449; cursor:grab; touch-action:none; text-align:left; }
-.sheet-field .move-handle span { background:#f4ebfd; padding:1px 4px; border-radius:3px; }
+
 .sheet-field .move-handle:active { cursor:grabbing; }
-.sheet-field .resize-handle { position:absolute; right:0; bottom:0; width:25px; height:25px; padding:0; cursor:nwse-resize; touch-action:none; }
+.sheet-field .resize-handle { position:absolute; right:0; bottom:0; width:12px; height:12px; padding:0; border:2px solid #6e349e; border-radius:2px; background:#fff; cursor:nwse-resize; touch-action:none; transform:translate(50%,50%); }
+.sheet-field .resize-handle.left { left:0; right:auto; translate:-12px 0; cursor:nesw-resize; }
+.sheet-field .resize-handle.top { top:0; bottom:auto; translate:0 -12px; cursor:nesw-resize; }
+.sheet-field .resize-handle.left.top { translate:-12px -12px; cursor:nwse-resize; }
 .sheet-error { color:#ffc0d0; }
 </style>

@@ -81,7 +81,7 @@ async function main(){
  await asset(secondBackground,200,1,image(80,60))
  await asset(secondBackground,200,0,image(80,60))
  await asset(secondBackground,403,2)
- for(const invalid of [{value:'41'},{reference:'for'},{height:601},{type:'checkbox',value:'1'},{type:'radio',options:['A'],value:'B'}]){
+ for(const invalid of [{value:'41'},{reference:'for'},{height:601},{width:11},{type:'checkbox',value:'1'},{type:'radio',options:['A'],value:'B'}]){
   const update=form('Ficha inválida',player)
   update.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],fields:[{...pages[1].fields[0],...invalid}]}]}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)

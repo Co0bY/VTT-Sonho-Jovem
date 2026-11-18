@@ -22,3 +22,9 @@ Para validar, crie duas páginas com imagens distintas, arraste e redimensione u
 - `pnpm --filter @vtt/api test:sheet-browser` verificou upload de dois fundos, movimentação e redimensionamento, destaque, rótulo oculto, preenchimento dos quatro novos tipos e recuperação após falha simulada ao salvar.
 - No Ubuntu (WSL), as bibliotecas ausentes do Chromium do Playwright foram extraídas em diretório temporário e usadas via `LD_LIBRARY_PATH`, sem instalação de pacotes do sistema.
 - `pnpm --filter @vtt/api test:browser` passou na regressão completa da mesa, incluindo criação do personagem pela ficha, arraste por ponteiro, movimento por teclado e reabertura como jogador controlador.
+
+## Posicionamento sobre uma ficha impressa
+
+Em **Editar ficha**, clique em **Adicionar campo** e desenhe o retângulo diretamente sobre a caixa impressa. Um clique insere um campo de 120 × 24 px. Com o quadro em foco, Enter insere esse mesmo tamanho e Esc cancela. Ao adicionar sobre uma imagem de fundo, o rótulo fica oculto inicialmente para aproveitar o texto já impresso. A propriedade **Ocultar rótulo** pode ser alterada depois.
+
+Clique no campo ou escolha seu nome no seletor **Campo selecionado**. O contorno e o preenchimento violeta indicam a seleção enquanto você edita as propriedades. Arraste pelo centro para mover ou por qualquer canto para ajustar a área. O tamanho mínimo é de 12 × 12 px e o máximo segue os limites da página, o que permite encaixar tanto um atributo como Força quanto uma faixa larga como Tipos de Dano.

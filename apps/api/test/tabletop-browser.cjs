@@ -79,6 +79,7 @@ async function main() {
   await page.getByLabel('Imagem de fundo da ficha',{exact:true}).setInputFiles({name:'ficha.png',mimeType:'image/png',buffer:sampleImage(80,110)})
   await page.getByRole('img',{name:'Fundo da ficha',exact:true}).waitFor()
   await page.getByRole('button',{name:'+ Adicionar campo',exact:true}).click()
+  await page.locator('.sheet-board').click({position:{x:24,y:24}})
   await page.getByLabel('Rótulo do campo',{exact:true}).fill('Força')
   await page.getByLabel('Referência do campo',{exact:true}).fill('for')
   await page.getByLabel('Tipo do campo',{exact:true}).selectOption('number')
