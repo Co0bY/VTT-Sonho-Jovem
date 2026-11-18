@@ -14,3 +14,10 @@ Arraste o corpo de um campo para movê-lo. Selecione o campo para revelar a alç
 Use **Concluir edição** para preencher os campos e **Salvar personagem** para gravar todas as páginas de uma vez. A versão 2 do JSON agrupa campos por página, preserva referências únicas na ficha inteira e associa imagens a IDs de página. Ao abrir uma ficha antiga, o editor reaproveita o fundo, as posições e os valores na primeira página. O servidor valida o layout, mantém os nomes internos dos arquivos sob seu controle e só serve os fundos ao mestre ou ao controlador do personagem.
 
 Para validar, crie duas páginas com imagens distintas, arraste e redimensione um campo, configure uma barra e uma opção de cada tipo e preencha os valores. Salve e reabra a ficha para conferir os fundos, a aparência e os valores nas duas páginas.
+
+## Validações executadas
+
+- `pnpm build`, `pnpm --filter @vtt/web typecheck` e `pnpm --filter @vtt/web test` passaram, incluindo os 19 testes de geometria.
+- `pnpm --filter @vtt/api test:characters` verificou a atualização de fichas antigas, a autorização de imagens, a remoção isolada de um fundo e a rejeição de valores inválidos.
+- `pnpm --filter @vtt/api test:sheet-browser` verificou upload de dois fundos, movimentação e redimensionamento, destaque, rótulo oculto, preenchimento dos quatro novos tipos e recuperação após falha simulada ao salvar.
+- No Ubuntu (WSL), as bibliotecas ausentes do Chromium do Playwright foram extraídas em diretório temporário e usadas via `LD_LIBRARY_PATH`, sem instalação de pacotes do sistema.

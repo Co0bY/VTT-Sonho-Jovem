@@ -10,48 +10,56 @@ const emit=defineEmits<{close:[]}>()
 const name=ref(''),owner=ref(''),color=ref('#a47ae2'),localError=ref('')
 const tab=ref('card'),description=ref(''),notes=ref('')
 const sheet=ref(editableSheet())
-const pageUploads=reactive(new Map<string,{file:File;url:string;loading:boolean}>())
-function releasePages(){
-  for(const upload of pageUploads.values())URL.revokeObjectURL(upload.url)
-  pageUploads.clear()
+const pageUploads=reactive(new Map<string,{file:File;url:string}>())
+const pendingImages=reactive(new Map<string,string>())
+function cancelPageImage(id:string){
+  const url=pendingImages.get(id)
+  if(url)URL.revokeObjectURL(url)
+  pendingImages.delete(id)
 }
 function removePageUpload(id:string){
+  cancelPageImage(id)
   const upload=pageUploads.get(id)
   if(upload)URL.revokeObjectURL(upload.url)
   pageUploads.delete(id)
 }
+function releasePages(){
+  for(const id of pendingImages.keys())cancelPageImage(id)
+  for(const id of pageUploads.keys())removePageUpload(id)
+}
 async function selectPageImage(id:string,event:Event){
   const file=readImage(event)
   if(!file)return
-  removePageUpload(id)
+  cancelPageImage(id)
   const url=URL.createObjectURL(file)
-  pageUploads.set(id,{file,url,loading:true})
+  pendingImages.set(id,url)
   const image=new Image()
   image.src=url
   try{
     await image.decode()
-    const upload=pageUploads.get(id)
-    if(upload?.url!==url)return
-    sheet.value={...sheet.value,pages:sheet.value.pages.map(page=>{
-      if(page.id!==id)return page
-      const height=Math.max(300,Math.min(4000,Math.round(page.width*image.naturalHeight/image.naturalWidth)))
-      return {...page,height,removeBackground:false,fields:page.fields.map(field=>({
-        ...field,height:Math.min(height,field.height),
-        y:Math.round(Math.max(0,Math.min(height-field.height,field.y*height/page.height))),
-      }))}
-    })}
-    upload.loading=false
   }catch{
-    if(pageUploads.get(id)?.url!==url)return
-    removePageUpload(id)
+    if(pendingImages.get(id)!==url)return
+    cancelPageImage(id)
     localError.value='Não foi possível abrir a imagem de fundo da página.'
+    return
   }
+  if(pendingImages.get(id)!==url)return
+  pendingImages.delete(id)
+  removePageUpload(id)
+  pageUploads.set(id,{file,url})
+  sheet.value={...sheet.value,pages:sheet.value.pages.map(page=>{
+    if(page.id!==id)return page
+    const height=Math.max(300,Math.min(4000,Math.round(page.width*image.naturalHeight/image.naturalWidth)))
+    return {...page,height,removeBackground:false,fields:page.fields.map(field=>{
+      const fieldHeight=Math.min(height,field.height)
+      const y=Math.round(Math.min(height-fieldHeight,field.y*height/page.height))
+      return {...field,height:fieldHeight,y}
+    })}
+  })}
 }
 function pageBackground(id:string){
-  const upload=pageUploads.get(id)
-  if(upload&&!upload.loading)return upload.url
   const page=sheet.value.pages.find(page=>page.id===id)
-  return page?.removeBackground?null:page?.backgroundUrl
+  return pageUploads.get(id)?.url??(page?.removeBackground?null:page?.backgroundUrl)
 }
 const sheetEditor=ref<InstanceType<typeof CharacterSheetEditor>>()
 const kinds=['appearance','token'] as const
@@ -86,7 +94,7 @@ function selectImage(kind:Kind,event:Event){
 function removeImage(kind:Kind){release(kind);uploads[kind]=null;removed[kind]=true;if(inputs[kind])inputs[kind]!.value=''}
 async function save(){
   localError.value=''
-  if([...pageUploads.values()].some(upload=>upload.loading)){localError.value='Aguarde o carregamento da imagem de fundo.';return}
+  if(pendingImages.size){localError.value='Aguarde o carregamento da imagem de fundo.';return}
   if(!name.value.trim()){tab.value='card';localError.value='Informe o nome do personagem.';return}
   if(description.value.length>20000||notes.value.length>20000){localError.value='Use até 20.000 caracteres em cada editor, incluindo formatação.';return}
   const invalidSheet=sheetError(sheet.value)
@@ -135,5 +143,5 @@ onBeforeUnmount(()=>{releasePages();for(const kind of kinds)release(kind)})
 <style scoped>
 .character-tabs{margin-bottom:20px;border-bottom:1px solid #59436a;color:#d8c0ed}.character-tabs :deep(.q-tab){font-size:13px;padding:0 12px}.character-tabs :deep(.q-tab--active){color:#e4c7ff}.character-editor textarea{display:block;width:100%;min-height:180px;resize:vertical;padding:12px;border:1px solid #59436a;border-radius:8px;background:#17111e;color:#eadff3;font:inherit;line-height:1.7;margin-top:8px}.character-editor textarea:focus{outline:2px solid #b48ce9;outline-offset:2px}.character-empty-tab{min-height:260px}
 
-.character-dialog{width:620px;max-width:94vw;max-height:90vh;overflow:auto}.character-dialog.character-dialog-sheet{width:1000px}.character-dialog h2{font-size:24px;margin:12px 0 22px}.character-images{display:grid;grid-template-columns:1fr 1fr;gap:16px}.character-images fieldset{min-width:0;border:1px solid #59436a;border-radius:10px;padding:12px}.character-images legend{color:#d8c0ed;font-size:14px;padding:0 7px}.character-image-preview{height:145px;background:#15101d;border-radius:8px;display:grid;place-items:center;overflow:hidden;color:#c2a2e4;font-size:44px}.character-image-preview img{width:100%;height:100%;object-fit:contain}.token-preview img{max-width:130px;max-height:130px}.character-images label{font-size:11px;margin:12px 0}.character-images input[type=file]{padding:7px;font-size:10px;max-width:100%}.character-images p,.character-hint{font-size:11px!important;color:#ad96bc;line-height:1.7}.character-images button{font-size:11px;padding:6px 0}.character-hint{margin:12px 0}.character-dialog select{width:100%;padding:12px;border:1px solid #59436a;background:#17111e;color:#eadff3;border-radius:7px}.character-color{display:flex;align-items:center;justify-content:space-between}.character-color input{width:55px;height:35px;padding:3px;margin:0}.character-error{color:#ffc0d0!important}@media(max-width:480px){.character-images{gap:8px}.character-images fieldset{padding:8px}.character-image-preview{height:110px}.character-images input[type=file]{font-size:9px}}
+.character-dialog{width:620px;max-width:94vw;max-height:90vh;overflow:auto}.character-dialog.character-dialog-sheet{width:1160px}.character-dialog h2{font-size:24px;margin:12px 0 22px}.character-images{display:grid;grid-template-columns:1fr 1fr;gap:16px}.character-images fieldset{min-width:0;border:1px solid #59436a;border-radius:10px;padding:12px}.character-images legend{color:#d8c0ed;font-size:14px;padding:0 7px}.character-image-preview{height:145px;background:#15101d;border-radius:8px;display:grid;place-items:center;overflow:hidden;color:#c2a2e4;font-size:44px}.character-image-preview img{width:100%;height:100%;object-fit:contain}.token-preview img{max-width:130px;max-height:130px}.character-images label{font-size:11px;margin:12px 0}.character-images input[type=file]{padding:7px;font-size:10px;max-width:100%}.character-images p,.character-hint{font-size:11px!important;color:#ad96bc;line-height:1.7}.character-images button{font-size:11px;padding:6px 0}.character-hint{margin:12px 0}.character-dialog select{width:100%;padding:12px;border:1px solid #59436a;background:#17111e;color:#eadff3;border-radius:7px}.character-color{display:flex;align-items:center;justify-content:space-between}.character-color input{width:55px;height:35px;padding:3px;margin:0}.character-error{color:#ffc0d0!important}@media(max-width:480px){.character-images{gap:8px}.character-images fieldset{padding:8px}.character-image-preview{height:110px}.character-images input[type=file]{font-size:9px}}
 </style>
