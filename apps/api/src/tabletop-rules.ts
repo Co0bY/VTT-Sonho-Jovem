@@ -28,7 +28,7 @@ export function rollDice(expression: string) {
 
 const reductions = ['maior','menor','somar','subtrair','multiplicar','dividir'] as const
 type Reduction=typeof reductions[number]
-type DiceGroup={count:number|null;sides:number;reduction:Reduction}
+type DiceGroup={count:number|null;sides:number;reduction:Reduction|null}
 
 function reduction(value:unknown):value is Reduction {
   return reductions.some(operation=>operation===value)
@@ -39,16 +39,20 @@ export function diceGroups(raw:unknown,allowFieldValue:boolean){
   if(!raw||typeof raw!=='object'||Array.isArray(raw))return invalid()
   const {groups,combine}=raw as Record<string,unknown>
   if(!Array.isArray(groups)||groups.length<1||groups.length>10||(combine!==null&&(!reduction(combine)||groups.length<2)))return invalid()
-  return {combine,groups:groups.map((item:unknown):DiceGroup=>{
+  const validatedGroups=groups.map((item:unknown):DiceGroup=>{
     if(!item||typeof item!=='object'||Array.isArray(item))return invalid()
     const {count,sides,reduction:operation}=item as Record<string,unknown>
-    if(!reduction(operation))return invalid()
+    if(operation!==null&&!reduction(operation))return invalid()
     return {
       count:allowFieldValue&&count===null?null:integer(count,1,50,'Quantidade de dados'),
       sides:integer(sides,2,1000,'Faces do dado'),
       reduction:operation,
     }
-  })}
+  })
+  if(combine&&validatedGroups.some(group=>group.reduction===null)){
+    throw new BadRequestException('Para combinar resultados, selecione um resultado em cada rolagem.')
+  }
+  return {combine,groups:validatedGroups}
 }
 
 function reduceDice(values:number[],operation:Reduction){
@@ -69,8 +73,8 @@ export function rollDiceGroups(raw:unknown){
   const {groups,combine}=diceGroups(raw,false)
   const results=groups.map(group=>{
     const {expression,rolls}=rollDice(`${group.count}d${group.sides}`)
-    return {expression,rolls,reduction:group.reduction,total:reduceDice(rolls,group.reduction)}
+    return {expression,rolls,reduction:group.reduction,total:group.reduction===null?null:reduceDice(rolls,group.reduction)}
   })
-  const total=combine?reduceDice(results.map(group=>group.total),combine):results.length===1?results[0].total:null
+  const total=combine?reduceDice(results.flatMap(group=>group.total===null?[]:[group.total]),combine):results.length===1?results[0].total:null
   return {expression:results.map(group=>group.expression).join(', '),groups:results,combine,total}
 }

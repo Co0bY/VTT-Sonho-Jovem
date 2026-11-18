@@ -2,7 +2,7 @@ export const events = {clique:'Clique',enter:'Enter',mudanca:'Modificação'} as
 export type MacroEvent = keyof typeof events
 export const reductions={maior:'Maior valor',menor:'Menor valor',somar:'Somar',subtrair:'Subtrair',multiplicar:'Multiplicar',dividir:'Dividir'} as const
 export type Reduction=keyof typeof reductions
-export type DiceGroup={count:number|null;sides:number;reduction:Reduction}
+export type DiceGroup={count:number|null;sides:number;reduction:Reduction|null}
 export type DiceAction={kind:'rolar';groups:DiceGroup[];combine:Reduction|null}
 export type MacroAction=DiceAction|{kind:'rolar';sides:number}|{kind:'chat'}
 export type SheetMacro={fieldId:string;event:MacroEvent;action:MacroAction}
@@ -19,7 +19,7 @@ export function macroText(rules:SheetMacro[],fields:MacroField[]){
     const reference=fields.find(field=>field.id===rule.fieldId)?.reference
     if(rule.action.kind==='chat')return `quando ${reference} ${rule.event} chat`
     const {groups,combine}=diceAction(rule.action)
-    const dice=groups.map(group=>`${group.count??''}d${group.sides}${group.reduction==='somar'?'':` ${group.reduction}`}`).join(', ')
+    const dice=groups.map(group=>`${group.count??''}d${group.sides}${group.reduction==='somar'?'':` ${group.reduction??'null'}`}`).join(', ')
     return `quando ${reference} ${rule.event} rolar ${dice}${combine?` combinar ${combine}`:''}`
   }).join('\n')
 }
@@ -32,17 +32,19 @@ function parseDice(text:string,error:(detail:string)=>Error):DiceAction {
   const parts=groupsText!.split(',')
   if(combine&&parts.length<2)throw error('use “combinar” com pelo menos duas rolagens.')
   if(parts.length>MAX_DICE_GROUPS)throw error('use até 10 rolagens por ação.')
-  const groups=parts.map(part=>{
+  const groups=parts.map((part):DiceGroup=>{
     const match=/^(\d{1,2})?d(\d{1,4})(?:\s+(\w+))?$/.exec(part.trim())
     if(!match)throw error('use “d6” para quantidade do campo ou “2d6 maior” para quantidade fixa.')
     const count=match[1]?Number(match[1]):null
     const sides=Number(match[2])
-    const reduction=match[3]??'somar'
+    const operation=match[3]??'somar'
     if(count!==null&&(count<1||count>50))throw error('use de 1 a 50 dados por rolagem.')
     if(sides<2||sides>1000)throw error('use de 2 a 1.000 faces.')
-    if(!isReduction(reduction))throw error('operação inválida para a rolagem.')
-    return {count,sides,reduction}
+    if(operation==='null')return {count,sides,reduction:null}
+    if(!isReduction(operation))throw error('operação inválida para a rolagem.')
+    return {count,sides,reduction:operation}
   })
+  if(combine&&groups.some(group=>group.reduction===null))throw error('para combinar, selecione um resultado em cada rolagem.')
   return {kind:'rolar',groups,combine:combine as Reduction|null}
 }
 

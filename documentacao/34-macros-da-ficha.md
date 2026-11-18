@@ -37,3 +37,7 @@ quando ataque enter rolar 2d8 multiplicar, 1d4
 
 A integração verificou subtração, multiplicação e soma reproduzindo os resultados a partir das faces registradas, além da rejeição de uma quantidade sem resolução. O teste focado verificou quantidades fixa e variável no mesmo evento, retorno do maior e menor valor, divisão entre grupos, sincronização com a DSL e exibição no chat.
 A checagem de tipos, o build web e a regressão completa da mesa também passaram. O Vite sinalizou um pacote JavaScript acima de 500 kB após minificação.
+
+O seletor **Resultado dos dados** também aceita uma opção em branco. Ela aparece como `null` no texto, por exemplo `quando for clique rolar 3d6 null`. O chat exibe as três faces sorteadas e deixa o total em branco. Se alguma rolagem estiver assim, os grupos ficam separados. Para combinar, selecione um cálculo em cada grupo.
+
+O teste de navegador confirmou a seleção em branco, a conversão para `null` e de volta aos blocos, a persistência após salvar e a exibição das faces no chat sem total. A compilação da API e a checagem de tipos do web passaram.

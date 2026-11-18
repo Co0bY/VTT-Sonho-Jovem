@@ -70,7 +70,9 @@ function updateDice(index:number,patch:Partial<DiceAction>){
 }
 function updateGroup(index:number,groupIndex:number,patch:Partial<DiceGroup>){
   const groups=groupAction(props.modelValue[index]!)?.groups
-  if(groups)updateDice(index,{groups:groups.map((group,position)=>position===groupIndex?{...group,...patch}:group)})
+  if(!groups)return
+  const updated=groups.map((group,position)=>position===groupIndex?{...group,...patch}:group)
+  updateDice(index,{groups:updated,...(updated.some(group=>group.reduction===null)?{combine:null}:{})})
 }
 function addGroup(index:number){
   const groups=groupAction(props.modelValue[index]!)?.groups
@@ -184,8 +186,9 @@ function drop(event:DragEvent,index?:number){
                 @input="editGroupNumber(index,groupIndex,$event,'sides')" @change="restoreGroupNumber($event,group.sides)">
             </label>
             <label>Resultado dos dados
-              <select :aria-label="`Resultado da rolagem ${groupIndex+1}`" :value="group.reduction"
-                @change="updateGroup(index,groupIndex,{reduction:($event.target as HTMLSelectElement).value as Reduction})">
+              <select :aria-label="`Resultado da rolagem ${groupIndex+1}`" :value="group.reduction??''"
+                @change="updateGroup(index,groupIndex,{reduction:(($event.target as HTMLSelectElement).value||null) as Reduction|null})">
+                <option value="" aria-label="Sem cálculo"></option>
                 <option v-for="(label,operation) in reductions" :key="operation" :value="operation">{{ label }}</option>
               </select>
             </label>
@@ -195,11 +198,12 @@ function drop(event:DragEvent,index?:number){
           <div class="macro-add">
             <button type="button" :disabled="disabled || (groupAction(rule)?.groups.length??0)>=MAX_DICE_GROUPS" @click="addGroup(index)">Adicionar rolagem</button>
             <label v-if="(groupAction(rule)?.groups.length??0)>1">Resultados das rolagens
-              <select aria-label="Combinar resultados das rolagens" :value="groupAction(rule)?.combine??''" :disabled="disabled"
+              <select aria-label="Combinar resultados das rolagens" :value="groupAction(rule)?.combine??''" :disabled="disabled || groupAction(rule)?.groups.some(group=>group.reduction===null)"
                 @change="updateDice(index,{combine:(($event.target as HTMLSelectElement).value||null) as Reduction|null})">
                 <option value="">Mostrar separados</option>
                 <option v-for="(label,operation) in reductions" :key="operation" :value="operation">{{ label }}</option>
               </select>
+              <small v-if="groupAction(rule)?.groups.some(group=>group.reduction===null)">Escolha um resultado em cada rolagem para combinar.</small>
             </label>
           </div>
         </div>
