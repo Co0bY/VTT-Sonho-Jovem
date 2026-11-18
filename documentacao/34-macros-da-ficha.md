@@ -65,3 +65,5 @@ quando for mudanca atribuir bonus
 ```
 
 Para reservar um campo para a lógica da ficha, selecione-o em **Editar ficha** e marque **Somente leitura**. O preenchimento manual fica bloqueado e as regras continuam podendo atualizar o valor. Use **Salvar personagem** para guardar a configuração e, depois de usar as regras, gravar os valores atualizados.
+
+Build da API, typecheck e integração de personagens passaram. A integração rejeitou destinos inexistentes e iguais à origem. O teste de navegador vinculou dois campos de páginas diferentes, bloqueou a edição manual do destino e verificou o valor copiado e salvo.
