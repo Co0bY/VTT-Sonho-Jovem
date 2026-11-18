@@ -2,7 +2,7 @@
 
 Na mesa, abra **Personagens**, edite um personagem e escolha **Ficha → Editar ficha**. **Adicionar página** cria uma página independente. Use os botões numerados para alternar e o seletor de arquivo para colocar um fundo na página atual. São aceitas até cinco páginas e cem campos no total. Cada fundo pode ter até 10 MB em PNG, JPEG ou WebP.
 
-Arraste o corpo de um campo para movê-lo. Selecione o campo para revelar a alça no canto inferior direito, que muda largura e altura. Também é possível usar as setas com foco no campo ou na alça, com Shift para avançar dez pixels. A posição e o tamanho respeitam os limites da página. **Destacar campo** dá contraste ao fundo transparente. **Ocultar rótulo** esconde o texto na ficha preenchível e preserva o nome acessível do controle.
+Arraste o corpo de um campo para movê-lo. Selecione o campo para revelar as quatro alças de redimensionamento. Também é possível usar as setas com foco no campo ou em uma alça, com Shift para avançar dez pixels. A posição e o tamanho respeitam os limites da página. **Destacar campo** dá contraste ao fundo transparente. **Ocultar rótulo** esconde o texto na ficha preenchível e preserva o nome acessível do controle.
 
 | Tipo | Configuração e preenchimento |
 | --- | --- |
@@ -28,3 +28,5 @@ Para validar, crie duas páginas com imagens distintas, arraste e redimensione u
 Em **Editar ficha**, clique em **Adicionar campo** e desenhe o retângulo diretamente sobre a caixa impressa. Um clique insere um campo de 120 × 24 px. Com o quadro em foco, Enter insere esse mesmo tamanho e Esc cancela. Ao adicionar sobre uma imagem de fundo, o rótulo fica oculto inicialmente para aproveitar o texto já impresso. A propriedade **Ocultar rótulo** pode ser alterada depois.
 
 Clique no campo ou escolha seu nome no seletor **Campo selecionado**. O contorno e o preenchimento violeta indicam a seleção enquanto você edita as propriedades. Arraste pelo centro para mover ou por qualquer canto para ajustar a área. O tamanho mínimo é de 12 × 12 px e o máximo segue os limites da página, o que permite encaixar tanto um atributo como Força quanto uma faixa larga como Tipos de Dano.
+
+O teste focado no navegador desenhou e persistiu um campo de 35 × 22 px e outro com 700 px de largura, confirmou o destaque durante a edição do rótulo e redimensionou a barra por dois cantos opostos. O build, a checagem de tipos, a integração de personagens e a regressão de navegador da mesa também passaram.

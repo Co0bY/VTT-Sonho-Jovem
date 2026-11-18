@@ -69,7 +69,7 @@ function addField(rect:Rect){
 async function startPlacement(){
   placing.value=true
   await nextTick()
-  viewport.value?.focus()
+  viewport.value?.focus({preventScroll:true})
 }
 function cancelPlacement(){
   placing.value=false
