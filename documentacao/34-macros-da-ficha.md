@@ -14,3 +14,9 @@ quando postura mudanca chat
 **Clique** dispara ao clicar no controle. **Enter** usa o valor atual. **Modificação** dispara ao confirmar a alteração, como ao escolher uma opção ou sair de um campo de texto alterado. `rolar d6` usa o número do campo como quantidade de dados, entre 1 e 50. `chat` publica o valor como texto. Há uma ação por combinação de campo e evento, com até 100 regras. Linhas em branco e comentários iniciados com `#` são aceitos. Ao voltar dos blocos para o texto, o editor gera as regras em formato padronizado.
 
 Salve o personagem e reabra a ficha para executar as regras durante o preenchimento. Os eventos do editor de layout e do preenchimento de prévia do layout não enviam mensagens. A rolagem usa o serviço de dados da mesa, que calcula o resultado no servidor. As regras são guardadas com a ficha e referenciam o ID estável do campo. Renomear uma referência atualiza sua forma textual, e excluir um campo remove suas regras.
+
+## Validações
+
+- `pnpm --filter @vtt/api build` e `pnpm --filter @vtt/web typecheck` compilaram os contratos da API e da interface. `pnpm --filter @vtt/web test` passou nos 19 testes de geometria.
+- `pnpm --filter @vtt/api test:characters` rejeitou campo inexistente, evento desconhecido, faces fora do intervalo e regras duplicadas.
+- `pnpm --filter @vtt/api test:sheet-browser` arrastou blocos, conferiu ambas as conversões, corrigiu uma regra inválida, salvou e reabriu a ficha. Verificou no chat uma rolagem com 12 dados, uma mensagem literal iniciada por `/roll` e o evento de mudança de um select.

@@ -185,7 +185,7 @@ async function main(){
  ])
  assert.equal(snapshot.messages.at(-3).roll.rolls.length,12)
  assert.deepEqual(errors,[])
- console.log('PASS ficha no navegador: duas páginas, fundos independentes, gesto de arraste, redimensionamento, aparência, novos tipos e recuperação após falha ao salvar.')
+ console.log('PASS ficha no navegador: duas páginas, fundos independentes, gesto de arraste, redimensionamento, aparência, novos tipos, recuperação após falha ao salvar, sincronização de macros e execução no chat.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
  if(browser)await browser.close()

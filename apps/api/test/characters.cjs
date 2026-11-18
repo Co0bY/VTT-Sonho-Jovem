@@ -86,6 +86,12 @@ async function main(){
   update.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],fields:[{...pages[1].fields[0],...invalid}]}]}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)
  }
+ const macro={fieldId:pages[1].fields[0].id,event:'clique',action:{kind:'rolar',sides:6}}
+ for(const invalid of [[macro,macro],[{...macro,fieldId:randomUUID()}],[{...macro,event:'focus'}],[{...macro,action:{kind:'rolar',sides:1}}]]){
+  const update=form('Regra inválida',player)
+  update.append('sheet',JSON.stringify({...sheetV2,macros:invalid}))
+  await request(`${base}/characters/${empty.id}/settings`,400,update,1)
+ }
  const removePageImage=form('Remover fundo da segunda',player)
  removePageImage.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],removeBackground:true,backgroundFile:legacyAgain.sheet_background_url.split('/').pop()}]}))
  const remaining=await request(`${base}/characters/${empty.id}/settings`,201,removePageImage,1)
