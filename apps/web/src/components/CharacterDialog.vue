@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue
 import CharacterSheetMacros from './CharacterSheetMacros.vue'
 import { macroMessage, type MacroEvent, type MacroMessage } from '../tabletop/sheet-macros'
 import CharacterSheetEditor from './CharacterSheetEditor.vue'
-import { editableSheet, fieldValueError, sheetError } from '../tabletop/character-sheet'
+import CharacterSheetModels from './CharacterSheetModels.vue'
+import { editableSheet, fieldValueError, sheetError, type CharacterSheet } from '../tabletop/character-sheet'
 import CharacterTextEditor from './CharacterTextEditor.vue'
 import { editorHtml } from '../tabletop/rich-text'
 import type { Character, Member } from '../tabletop/types'
@@ -12,9 +13,13 @@ const emit=defineEmits<{close:[]}>()
 const name=ref(''),owner=ref(''),color=ref('#a47ae2'),localError=ref('')
 const tab=ref('card'),description=ref(''),notes=ref('')
 const sheet=ref(editableSheet())
+const modelBusy = ref(false)
+const importedSheet = ref(false)
+const sheetRevision = ref(0)
 const macroEditor=ref<InstanceType<typeof CharacterSheetMacros>>()
 const macroFields=computed(()=>sheet.value.pages.flatMap(page=>page.fields))
 const savedMacros=computed(()=>{
+  if (importedSheet.value) return []
   const saved=props.character?.sheet
   return saved?.version===2?saved.macros??[]:[]
 })
@@ -95,6 +100,16 @@ function pageBackground(id:string){
   const page=sheet.value.pages.find(page=>page.id===id)
   return pageUploads.get(id)?.url??(page?.removeBackground?null:page?.backgroundUrl)
 }
+function applySheetModel(model: CharacterSheet, backgrounds: Map<string, File>) {
+  releasePages()
+  for (const [id, file] of backgrounds) {
+    pageUploads.set(id, { file, url: URL.createObjectURL(file) })
+  }
+  sheet.value = model
+  importedSheet.value = true
+  sheetRevision.value++
+  macroStatus.value = ''
+}
 const sheetEditor=ref<InstanceType<typeof CharacterSheetEditor>>()
 const sheetWindowTarget = shallowRef<HTMLElement>()
 let sheetWindow: Window | undefined
@@ -153,6 +168,8 @@ const removed=reactive<Record<Kind,boolean>>({appearance:false,token:false})
 function release(kind:Kind){if(previews[kind].startsWith('blob:'))URL.revokeObjectURL(previews[kind]);previews[kind]=''}
 watch(()=>[props.open,props.character?.id],()=>{
   closeSheetWindow()
+  modelBusy.value = false
+  importedSheet.value = false
   releasePages()
   macroStatus.value=''
   if(!props.open){for(const kind of kinds){release(kind);uploads[kind]=null};return}
@@ -177,6 +194,7 @@ function selectImage(kind:Kind,event:Event){
 }
 function removeImage(kind:Kind){release(kind);uploads[kind]=null;removed[kind]=true;if(inputs[kind])inputs[kind]!.value=''}
 async function save(){
+  if (modelBusy.value) return
   localError.value=''
   if(pendingImages.size){localError.value='Aguarde o carregamento da imagem de fundo.';return}
   if(!name.value.trim()){tab.value='card';localError.value='Informe o nome do personagem.';return}
@@ -226,7 +244,9 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
         <section v-show="sheetWindowTarget || tab === 'sheet'" aria-label="Ficha"
           :role="sheetWindowTarget ? undefined : 'tabpanel'" :class="{ 'sheet-window': sheetWindowTarget }">
           <h1 v-if="sheetWindowTarget">{{ name.trim() || 'Ficha do personagem' }}</h1>
-          <CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
+          <CharacterSheetModels v-if="open" :key="character?.id" :sheet="sheet" :background-for="pageBackground"
+            :disabled="busy || pendingImages.size > 0" @busy="modelBusy = $event" @import="applySheetModel" />
+          <CharacterSheetEditor v-if="open" :key="sheetRevision" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :disabled="busy || modelBusy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
           <p v-if="macroStatus" role="status">{{ macroStatus }}</p>
           <p v-if="sheetWindowTarget && (localError || error)" role="alert" class="character-error">{{ localError || error }}</p>
         </section>
@@ -236,11 +256,11 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
         <CharacterTextEditor v-model="notes" label="Anotações" :disabled="busy" />
       </section>
       <section v-show="tab === 'settings'" role="tabpanel" aria-label="Configurações da ficha">
-        <CharacterSheetMacros v-if="open" ref="macroEditor" :model-value="sheet.macros ?? []" :fields="macroFields" :disabled="busy"
+        <CharacterSheetMacros v-if="open" :key="sheetRevision" ref="macroEditor" :model-value="sheet.macros ?? []" :fields="macroFields" :disabled="busy || modelBusy"
           @update:model-value="sheet={...sheet,macros:$event}" />
       </section>
       <p v-if="localError || error" role="alert" class="character-error">{{ localError || error }}</p>
-      <div class="modal-actions"><button type="button" class="text-button" :disabled="busy" @click="emit('close')">Cancelar</button><button class="primary" :disabled="busy">{{ character ? 'Salvar personagem' : 'Criar personagem' }}</button></div>
+      <div class="modal-actions"><button type="button" class="text-button" :disabled="busy" @click="emit('close')">Cancelar</button><button class="primary" :disabled="busy || modelBusy">{{ character ? 'Salvar personagem' : 'Criar personagem' }}</button></div>
     </form>
   </q-card-section></q-card></q-dialog>
 </template>

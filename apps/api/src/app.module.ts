@@ -9,6 +9,7 @@ import { layer, bounds, normalizeRotation } from './layers'
 import { imageSize } from 'image-size'
 import { MAX_SHEET_BYTES, sheetPageParts } from './character-sheet'
 import { Characters, type CharacterFiles } from './characters'
+import { SheetModels } from './sheet-models'
 import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express'
 import { Mailer } from './mailer'
 import { position, rollDice, rollDiceGroups, integer } from './tabletop-rules'
@@ -61,9 +62,34 @@ class Accounts {
 }
 @Controller()
 class ApiController {
-  constructor(private readonly accounts: Accounts, private readonly db: Database, private readonly mailer: Mailer, private readonly scenes: Scenes, private readonly storage: Storage, private readonly characters:Characters) {}
+  constructor(private readonly accounts: Accounts, private readonly db: Database, private readonly mailer: Mailer, private readonly scenes: Scenes, private readonly storage: Storage, private readonly characters:Characters, private readonly sheetModels: SheetModels) {}
   @Get('health') async health() { await this.db.pool.query('SELECT 1'); return { status: 'ok', database: 'up' } }
   @Get('auth/me') async me(@Req() req: Request, @Res({ passthrough: true }) res: Response) { res.setHeader('Cache-Control', 'no-store'); return this.accounts.user(req) }
+  @Get('modelos-ficha') async listSheetModels(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store')
+    return this.sheetModels.list((await this.accounts.user(req)).id)
+  }
+  @Post('modelos-ficha')
+  @UseInterceptors(FileFieldsInterceptor(sheetPageParts.map(name => ({ name, maxCount: 1 })), {
+    limits: { fileSize: MAX_IMAGE_BYTES, files: sheetPageParts.length, fields: 3, fieldSize: MAX_SHEET_BYTES },
+  }))
+  async createSheetModel(@Req() req: Request, @Body() body: Record<string, unknown>, @UploadedFiles() files?: CharacterFiles) {
+    this.accounts.mutation(req)
+    return this.sheetModels.create((await this.accounts.user(req)).id, body, files)
+  }
+  @Get('modelos-ficha/:id') async sheetModel(@Req() req: Request, @Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store')
+    return this.sheetModels.detail((await this.accounts.user(req)).id, id)
+  }
+  @Get('modelos-ficha/:id/fundos/:pageId')
+  async sheetModelBackground(@Req() req: Request, @Param('id') id: string, @Param('pageId') pageId: string, @Res({ passthrough: true }) res: Response) {
+    const { filename, file } = await this.sheetModels.background((await this.accounts.user(req)).id, id, pageId)
+    const extension = filename.split('.').pop()
+    res.setHeader('Content-Type', extension === 'jpg' ? 'image/jpeg' : `image/${extension}`)
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    return new StreamableFile(file.createReadStream())
+  }
   @Post('auth/register') async register(@Body() body: unknown, @Req() req: Request) {
     this.accounts.mutation(req, true)
     const name = field(body, 'name', 2, 80)
@@ -480,5 +506,5 @@ class ApiController {
     return { campaignId: rows[0].id }
   }
 }
-@Module({ controllers: [ApiController], providers: [Database, Accounts, Mailer, Scenes, Storage, Characters] })
+@Module({ controllers: [ApiController], providers: [Database, Accounts, Mailer, Scenes, Storage, Characters, SheetModels] })
 export class AppModule {}

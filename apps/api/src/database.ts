@@ -267,6 +267,21 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS sheet_background_file text;
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS description_format text NOT NULL DEFAULT 'plain' CHECK(description_format IN ('plain','html'));
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS notes_format text NOT NULL DEFAULT 'plain' CHECK(notes_format IN ('plain','html'));
+        DO $$ BEGIN
+          IF to_regtype('modelo_ficha_global') IS NULL THEN
+            CREATE TYPE modelo_ficha_global AS ENUM ('S', 'N');
+          END IF;
+        END $$;
+        CREATE TABLE IF NOT EXISTS modelos_ficha (
+          id uuid PRIMARY KEY,
+          owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name varchar(80) NOT NULL CHECK(length(btrim(name))>0),
+          global modelo_ficha_global NOT NULL DEFAULT 'N',
+          sheet jsonb NOT NULL CHECK(jsonb_typeof(sheet)='object'),
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS modelos_ficha_owner_idx ON modelos_ficha(owner_id, name);
+        CREATE INDEX IF NOT EXISTS modelos_ficha_global_idx ON modelos_ficha(name) WHERE global='S';
         CREATE TABLE IF NOT EXISTS tabletop_presence (
           campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
           user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
