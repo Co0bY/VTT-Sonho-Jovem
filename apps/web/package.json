@@ -6,7 +6,7 @@
     "dev": "quasar dev",
     "build": "quasar build",
     "typecheck": "vue-tsc --noEmit",
-    "test": "node --test test/geometry.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "dompurify": "^3.4.17",

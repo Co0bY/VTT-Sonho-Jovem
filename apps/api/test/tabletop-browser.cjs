@@ -57,7 +57,16 @@ async function main() {
   await db.query('INSERT INTO campaigns(id,owner_id,name,description,system) VALUES($1,$2,$3,$4,$5)',[campaignId,ownerId,'Crônicas do Crepúsculo','Uma aventura para testar o cenário, reunir o grupo e deixar os dados decidirem.','Sistema próprio'])
   await db.query('INSERT INTO campaign_members VALUES($1,$2)',[campaignId,playerId])
   browser=await chromium.launch({headless:true,args:['--no-sandbox','--enable-unsafe-swiftshader']})
-  const ownerContext=await contextFor(ownerToken), page=await ownerContext.newPage()
+  const ownerContext=await contextFor(ownerToken)
+  await ownerContext.addInitScript(()=>{
+    window.diceSounds=0
+    const start=AudioBufferSourceNode.prototype.start
+    AudioBufferSourceNode.prototype.start=function(...args){
+      window.diceSounds++
+      return start.apply(this,args)
+    }
+  })
+  const page=await ownerContext.newPage()
   await page.goto('http://127.0.0.1:9014/')
   await page.getByRole('link',{name:'Entrar na mesa →'}).click()
   await page.waitForURL(`**/mesas/${campaignId}`)
@@ -189,11 +198,28 @@ async function main() {
   await page.getByRole('button',{name:'Enviar ↗'}).click()
   await page.getByRole('button',{name:'d20',exact:true}).click()
   await page.locator('.dice-result').waitFor()
+  const diceCanvas=page.locator('[data-dice-animation]')
+  await diceCanvas.waitFor()
+  await page.waitForFunction(()=>{
+    const canvas=document.querySelector('[data-dice-animation]')
+    return canvas?.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data.some((value,index)=>index%4===3&&value>0)
+  })
+  await page.waitForFunction(()=>window.diceSounds>0)
+  await diceCanvas.waitFor({state:'detached'})
+  await page.getByRole('button',{name:'Silenciar som dos dados',exact:true}).click()
+  assert.equal(await page.getByRole('button',{name:'Silenciar som dos dados',exact:true}).getAttribute('aria-pressed'),'true')
+  const sounds=await page.evaluate(()=>window.diceSounds)
+  await page.getByRole('button',{name:'d6',exact:true}).click()
+  await diceCanvas.waitFor()
+  assert.equal(await page.evaluate(()=>window.diceSounds),sounds)
   // A second session must receive the persisted messages and be able to move its own token.
   const playerContext=await contextFor(playerToken), playerPage=await playerContext.newPage()
   await playerPage.goto(`http://127.0.0.1:9014/mesas/${campaignId}`)
   await playerPage.locator('.pixi-board canvas').waitFor()
   await playerPage.getByText('O grupo chegou ao cenário.',{exact:true}).waitFor()
+  assert.equal(await playerPage.locator('[data-dice-animation]').count(),0)
+  await page.getByRole('button',{name:'d12',exact:true}).click()
+  await playerPage.locator('[data-dice-animation]').waitFor()
   await playerPage.getByRole('button',{name:'Personagens',exact:true}).click()
   assert.equal(await playerPage.getByLabel('Camada de edição',{exact:true}).count(),0)
   assert.equal(await playerPage.getByRole('button',{name:'Camadas',exact:true}).count(),0)

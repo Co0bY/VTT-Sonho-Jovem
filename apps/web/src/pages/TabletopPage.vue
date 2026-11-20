@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import DiceRollOverlay from '../components/DiceRollOverlay.vue'
+import { newDiceBatches } from '../tabletop/dice-visuals'
+import { createDiceSound } from '../tabletop/dice-sound'
 import TabletopBoard from '../components/TabletopBoard.vue'
 import ScenesMenu from '../components/ScenesMenu.vue'
 import { reductions, type MacroMessage } from '../tabletop/sheet-macros'
@@ -43,6 +46,20 @@ function report(e: unknown) {
   error.value = e instanceof Error ? e.message : 'Falha ao conectar com a mesa.'
   if (e instanceof ApiError && (e.status === 401 || e.status === 403)) { accessDenied.value = true; loginRequired.value = e.status === 401; state.value = undefined }
 }
+const diceSound=createDiceSound()
+const diceQueue:ReturnType<typeof newDiceBatches>=[]
+const activeDice=ref<(typeof diceQueue)[number]>()
+const diceMuted=ref(localStorage.getItem('vtt-dice-muted')==='true')
+function unlockDiceSound(){if(!diceMuted.value)diceSound.unlock()}
+function toggleDiceSound(){
+  diceMuted.value=!diceMuted.value
+  localStorage.setItem('vtt-dice-muted',String(diceMuted.value))
+  unlockDiceSound()
+}
+function nextDiceBatch(){
+  activeDice.value=diceQueue.shift()
+  if(activeDice.value&&!diceMuted.value)diceSound.play(activeDice.value.dice.length)
+}
 async function refresh() {
   const requested = revision
   const data = await api<Tabletop>(endpoint)
@@ -50,6 +67,8 @@ async function refresh() {
   const element = chatList.value
   const shouldScroll = !state.value || !element || element.scrollHeight - element.scrollTop - element.clientHeight < 90
   if (state.value?.scene.id && state.value.scene.id !== data.scene.id) {selected.value='';transformTarget.value=null}
+  diceQueue.push(...newDiceBatches(state.value?.messages,data.messages))
+  if(!activeDice.value)nextDiceBatch()
   state.value = data
   const presentations=await api<{cursor:string;events:{id:string;card:CharacterCard}[]}>(`${endpoint}/presentations${presentationCursor===undefined?'':`?after=${presentationCursor}`}`)
   if(disposed||requested!==revision)return
@@ -116,13 +135,21 @@ async function transformImage(targetId:string,rect:Rect,targetLayer:Layer=editin
 async function addImage(){if(!objectFile.value)return;await action(async()=>{const data=new FormData();data.append('name',objectName.value);data.append('layer',editingLayer.value);data.append('image',objectFile.value!);await api(`${endpoint}/objects`,data);objectName.value='';objectFile.value=undefined;if(objectInput.value)objectInput.value.value=''})}
 watch(editingLayer,()=>{selected.value='';tool.value='select'},{flush:'sync'})
 watch(panel, async () => { if (panel.value === 'chat') { await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) } })
-onMounted(async () => { try { await refresh() } catch (e) { report(e) } finally { loading.value = false; if (!disposed && !accessDenied.value) timer = setTimeout(poll, 2000) } })
-onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(timer) })
+onMounted(async () => {
+  window.addEventListener('pointerdown',unlockDiceSound)
+  window.addEventListener('keydown',unlockDiceSound)
+  try { await refresh() } catch (e) { report(e) } finally { loading.value = false; if (!disposed && !accessDenied.value) timer = setTimeout(poll, 2000) } })
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerdown',unlockDiceSound)
+  window.removeEventListener('keydown',unlockDiceSound)
+  diceSound.close()
+  disposed = true; abort.abort(); if (timer) clearTimeout(timer) })
 </script>
 
 <template>
   <div class="tabletop-page">
-    <header class="table-header"><router-link to="/" class="table-back" aria-label="Voltar às minhas mesas">‹ <span>Minhas mesas</span></router-link><div class="table-title"><span class="table-logo">✦</span><div><h1>{{ state?.campaign.name || 'Mesa virtual' }}</h1><span>{{ state?.campaign.system || 'Sonho Jovem' }}</span></div></div><div class="table-header-right"><span v-if="state" class="table-role">{{ master ? 'Mestre' : 'Jogador' }}</span><button class="table-button" :aria-expanded="sidebar" aria-label="Mostrar ou ocultar painel da mesa" @click="sidebar = !sidebar">☷ <span>Painel</span></button></div></header>
+    <DiceRollOverlay v-if="activeDice" :key="activeDice.id" :dice="activeDice.dice" @finished="nextDiceBatch" />
+    <header class="table-header"><router-link to="/" class="table-back" aria-label="Voltar às minhas mesas">‹ <span>Minhas mesas</span></router-link><div class="table-title"><span class="table-logo">✦</span><div><h1>{{ state?.campaign.name || 'Mesa virtual' }}</h1><span>{{ state?.campaign.system || 'Sonho Jovem' }}</span></div></div><div class="table-header-right"><button v-if="state" type="button" class="table-button" aria-label="Silenciar som dos dados" :aria-pressed="diceMuted" :title="diceMuted ? 'Ativar som dos dados' : 'Silenciar som dos dados'" @click="toggleDiceSound">{{ diceMuted ? '♪ ×' : '♪' }}</button><span v-if="state" class="table-role">{{ master ? 'Mestre' : 'Jogador' }}</span><button class="table-button" :aria-expanded="sidebar" aria-label="Mostrar ou ocultar painel da mesa" @click="sidebar = !sidebar">☷ <span>Painel</span></button></div></header>
     <div v-if="loading" class="table-loading" role="status">Preparando a mesa e reunindo as histórias…</div>
     <div v-else-if="!state" class="table-loading"><h2>{{ loginRequired ? 'Entre para acessar a mesa' : 'Não foi possível abrir a mesa' }}</h2><p role="alert">{{ error }}</p><a v-if="loginRequired" :href="loginLink" class="primary">Entrar na conta</a><router-link v-else to="/" class="primary">Voltar às minhas mesas</router-link></div>
     <template v-else>
