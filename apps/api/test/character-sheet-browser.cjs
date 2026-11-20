@@ -29,7 +29,11 @@ async function main(){
  await page.goto(`${origin}/mesas/${campaign}`)
  await page.getByRole('button',{name:'Personagens',exact:true}).click()
  await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
+ const modal=page.locator('.character-dialog')
+ const modalSize=()=>modal.evaluate(element=>[element.offsetWidth,element.offsetHeight])
+ const cardSize=await modalSize()
  await page.getByRole('tab',{name:'Ficha',exact:true}).click()
+ assert.deepEqual(await modalSize(),cardSize)
  await page.getByRole('button',{name:'Editar ficha',exact:true}).click()
  await page.getByLabel('Imagem de fundo da ficha',{exact:true}).setInputFiles({name:'ficha.png',mimeType:'image/png',buffer:image(80,110)})
  async function drawField(x,y,width,height){
@@ -42,6 +46,17 @@ async function main(){
   await page.mouse.up()
  }
  await page.getByRole('img',{name:'Fundo da ficha',exact:true}).waitFor()
+ const [sheetWindow]=await Promise.all([
+  page.waitForEvent('popup'),
+  page.getByRole('button',{name:'Abrir ficha em nova janela',exact:true}).click(),
+ ])
+ await sheetWindow.getByRole('heading',{name:'Força de teste',exact:true}).waitFor()
+ const detachedBackground=sheetWindow.getByRole('img',{name:'Fundo da ficha',exact:true})
+ await detachedBackground.waitFor()
+ await detachedBackground.evaluate(img=>img.decode())
+ await sheetWindow.getByRole('button',{name:'+ Adicionar campo',exact:true}).click()
+ await sheetWindow.close()
+ await page.getByRole('button',{name:'Cancelar adição',exact:true}).click()
  await drawField(320,140,35,22)
  await page.getByLabel('Rótulo do campo',{exact:true}).fill('Força')
  assert.equal(await page.locator('.sheet-field.selected').count(),1)

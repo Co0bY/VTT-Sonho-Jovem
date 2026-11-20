@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue'
 import CharacterSheetMacros from './CharacterSheetMacros.vue'
 import { macroMessage, type MacroEvent, type MacroMessage } from '../tabletop/sheet-macros'
 import CharacterSheetEditor from './CharacterSheetEditor.vue'
@@ -96,6 +96,54 @@ function pageBackground(id:string){
   return pageUploads.get(id)?.url??(page?.removeBackground?null:page?.backgroundUrl)
 }
 const sheetEditor=ref<InstanceType<typeof CharacterSheetEditor>>()
+const sheetWindowTarget = shallowRef<HTMLElement>()
+let sheetWindow: Window | undefined
+
+function closeSheetWindow() {
+  const popup = sheetWindow
+  sheetWindow = undefined
+  sheetWindowTarget.value = undefined
+  popup?.close()
+}
+
+function openSheetWindow() {
+  if (sheetWindow && !sheetWindow.closed) {
+    sheetWindow.focus()
+    return
+  }
+
+  const popup = window.open('', '_blank', 'popup,width=1160,height=850,resizable=yes,scrollbars=yes')
+  if (!popup) {
+    localError.value = 'Permita pop-ups para abrir a ficha em uma nova janela.'
+    return
+  }
+
+  popup.opener = null
+  const popupDocument = popup.document
+  popupDocument.documentElement.lang = 'pt-BR'
+  popupDocument.title = name.value.trim() || 'Ficha do personagem'
+  const base = popupDocument.createElement('base')
+  base.href = document.baseURI
+  const viewport = popupDocument.createElement('meta')
+  viewport.name = 'viewport'
+  viewport.content = 'width=device-width, initial-scale=1'
+  popupDocument.head.append(base, viewport)
+  for (const stylesheet of document.head.querySelectorAll('style, link[rel="stylesheet"]')) {
+    popupDocument.head.append(popupDocument.importNode(stylesheet, true))
+  }
+
+  localError.value = ''
+  tab.value = 'sheet'
+  sheetWindow = popup
+  sheetWindowTarget.value = popupDocument.body
+  popup.addEventListener('pagehide', () => {
+    if (sheetWindow === popup) {
+      sheetWindow = undefined
+      sheetWindowTarget.value = undefined
+    }
+  }, { once: true })
+}
+
 const kinds=['appearance','token'] as const
 type Kind=typeof kinds[number]
 const inputs:Record<Kind,HTMLInputElement|null>={appearance:null,token:null}
@@ -104,6 +152,7 @@ const previews=reactive<Record<Kind,string>>({appearance:'',token:''})
 const removed=reactive<Record<Kind,boolean>>({appearance:false,token:false})
 function release(kind:Kind){if(previews[kind].startsWith('blob:'))URL.revokeObjectURL(previews[kind]);previews[kind]=''}
 watch(()=>[props.open,props.character?.id],()=>{
+  closeSheetWindow()
   releasePages()
   macroStatus.value=''
   if(!props.open){for(const kind of kinds){release(kind);uploads[kind]=null};return}
@@ -142,11 +191,17 @@ async function save(){
   sheet.value.pages.forEach((page,index)=>{const upload=pageUploads.get(page.id);if(upload)data.append(`sheet_page_${index}`,upload.file)})
   if(await props.save(props.character?.id??null,data))emit('close')
 }
-onBeforeUnmount(()=>{releasePages();for(const kind of kinds)release(kind)})
+onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)release(kind)})
 </script>
 <template>
-  <q-dialog :model-value="open" :persistent="busy" @update:model-value="emit('close')"><q-card class="modal character-dialog" :class="{'character-dialog-sheet':tab==='sheet'||tab==='settings'}"><q-card-section>
-    <span class="eyebrow">PERSONAGENS DA CAMPANHA</span><h2>{{ character ? 'Editar personagem' : 'Novo personagem' }}</h2>
+  <q-dialog :model-value="open" :persistent="busy" @update:model-value="emit('close')"><q-card class="modal character-dialog"><q-card-section>
+    <header class="character-dialog-header">
+      <div><span class="eyebrow">PERSONAGENS DA CAMPANHA</span><h2>{{ character ? 'Editar personagem' : 'Novo personagem' }}</h2></div>
+      <button type="button" class="text-button sheet-window-button" aria-label="Abrir ficha em nova janela"
+        title="Abrir ficha em nova janela" @click="openSheetWindow">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M13 5h6v6m0-6-9 9m0-9H5v14h14v-5"/></svg>
+      </button>
+    </header>
     <q-tabs v-model="tab" class="character-tabs" align="left" no-caps outside-arrows mobile-arrows aria-label="Abas do personagem">
       <q-tab name="card" label="Cartão de visita" :disable="busy" />
       <q-tab name="sheet" label="Ficha" :disable="busy" />
@@ -167,7 +222,16 @@ onBeforeUnmount(()=>{releasePages();for(const kind of kinds)release(kind)})
       <label class="character-color">Cor de identificação<input v-model="color" type="color" :disabled="busy"></label>
       <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
       </section>
-      <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha"><CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" /><p v-if="macroStatus" role="status">{{ macroStatus }}</p></section>
+      <Teleport :to="sheetWindowTarget" :disabled="!sheetWindowTarget">
+        <section v-show="sheetWindowTarget || tab === 'sheet'" aria-label="Ficha"
+          :role="sheetWindowTarget ? undefined : 'tabpanel'" :class="{ 'sheet-window': sheetWindowTarget }">
+          <h1 v-if="sheetWindowTarget">{{ name.trim() || 'Ficha do personagem' }}</h1>
+          <CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
+          <p v-if="macroStatus" role="status">{{ macroStatus }}</p>
+          <p v-if="sheetWindowTarget && (localError || error)" role="alert" class="character-error">{{ localError || error }}</p>
+        </section>
+      </Teleport>
+      <p v-if="tab === 'sheet' && sheetWindowTarget">A ficha está aberta em outra janela.</p>
       <section v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">
         <CharacterTextEditor v-model="notes" label="Anotações" :disabled="busy" />
       </section>
@@ -181,7 +245,14 @@ onBeforeUnmount(()=>{releasePages();for(const kind of kinds)release(kind)})
   </q-card-section></q-card></q-dialog>
 </template>
 <style scoped>
+.character-dialog-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.sheet-window-button { display:grid; place-items:center; }
+.sheet-window-button:hover { background:#ffffff12; border-radius:8px; }
+.sheet-window { padding:clamp(12px,3vw,32px); }
+.sheet-window h1 { font-size:24px; line-height:1.3; margin-bottom:16px; }
+.sheet-window :deep(.sheet-viewport) { max-height:calc(100dvh - 190px); min-height:180px; }
+
 .character-tabs{margin-bottom:20px;border-bottom:1px solid #59436a;color:#d8c0ed}.character-tabs :deep(.q-tab){font-size:13px;padding:0 12px}.character-tabs :deep(.q-tab--active){color:#e4c7ff}.character-editor textarea{display:block;width:100%;min-height:180px;resize:vertical;padding:12px;border:1px solid #59436a;border-radius:8px;background:#17111e;color:#eadff3;font:inherit;line-height:1.7;margin-top:8px}.character-editor textarea:focus{outline:2px solid #b48ce9;outline-offset:2px}
 
-.character-dialog{width:620px;max-width:94vw;max-height:90vh;overflow:auto}.character-dialog.character-dialog-sheet{width:1160px}.character-dialog h2{font-size:24px;margin:12px 0 22px}.character-images{display:grid;grid-template-columns:1fr 1fr;gap:16px}.character-images fieldset{min-width:0;border:1px solid #59436a;border-radius:10px;padding:12px}.character-images legend{color:#d8c0ed;font-size:14px;padding:0 7px}.character-image-preview{height:145px;background:#15101d;border-radius:8px;display:grid;place-items:center;overflow:hidden;color:#c2a2e4;font-size:44px}.character-image-preview img{width:100%;height:100%;object-fit:contain}.token-preview img{max-width:130px;max-height:130px}.character-images label{font-size:11px;margin:12px 0}.character-images input[type=file]{padding:7px;font-size:10px;max-width:100%}.character-images p,.character-hint{font-size:11px!important;color:#ad96bc;line-height:1.7}.character-images button{font-size:11px;padding:6px 0}.character-hint{margin:12px 0}.character-dialog select{width:100%;padding:12px;border:1px solid #59436a;background:#17111e;color:#eadff3;border-radius:7px}.character-color{display:flex;align-items:center;justify-content:space-between}.character-color input{width:55px;height:35px;padding:3px;margin:0}.character-error{color:#ffc0d0!important}@media(max-width:480px){.character-images{gap:8px}.character-images fieldset{padding:8px}.character-image-preview{height:110px}.character-images input[type=file]{font-size:9px}}
+.modal.character-dialog{width:1160px;max-width:94vw;height:90vh;overflow:auto}.character-dialog h2{font-size:24px;margin:12px 0 22px}.character-images{display:grid;grid-template-columns:1fr 1fr;gap:16px}.character-images fieldset{min-width:0;border:1px solid #59436a;border-radius:10px;padding:12px}.character-images legend{color:#d8c0ed;font-size:14px;padding:0 7px}.character-image-preview{height:145px;background:#15101d;border-radius:8px;display:grid;place-items:center;overflow:hidden;color:#c2a2e4;font-size:44px}.character-image-preview img{width:100%;height:100%;object-fit:contain}.token-preview img{max-width:130px;max-height:130px}.character-images label{font-size:11px;margin:12px 0}.character-images input[type=file]{padding:7px;font-size:10px;max-width:100%}.character-images p,.character-hint{font-size:11px!important;color:#ad96bc;line-height:1.7}.character-images button{font-size:11px;padding:6px 0}.character-hint{margin:12px 0}.character-dialog select{width:100%;padding:12px;border:1px solid #59436a;background:#17111e;color:#eadff3;border-radius:7px}.character-color{display:flex;align-items:center;justify-content:space-between}.character-color input{width:55px;height:35px;padding:3px;margin:0}.character-error{color:#ffc0d0!important}@media(max-width:480px){.character-images{gap:8px}.character-images fieldset{padding:8px}.character-image-preview{height:110px}.character-images input[type=file]{font-size:9px}}
 </style>
