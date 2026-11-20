@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import type { CharacterSheet, FieldType, SheetField, SheetPage } from '../tabletop/character-sheet'
 import type { MacroEvent } from '../tabletop/sheet-macros'
-import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
+import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_FIELDS, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
 
 const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;clickMacros:ReadonlySet<string>}>()
 const emit=defineEmits<{
@@ -34,7 +34,7 @@ const background=computed(()=>props.backgroundFor(page.value.id))
 const selected=computed(()=>page.value.fields.find(field=>field.id===selectedId.value))
 const fieldCount=computed(()=>props.modelValue.pages.reduce((count,item)=>count+item.fields.length,0))
 const validation=computed(()=>sheetError(props.modelValue))
-const types:Record<FieldType,string>={text:'Texto',number:'Número',bar:'Barra',select:'Lista (select)',radio:'Opção única (radio)',checkbox:'Caixa de seleção (checkbox)'}
+const types:Record<FieldType,string>={text:'Texto',textarea:'Texto multilinha',number:'Número',bar:'Barra',select:'Lista (select)',radio:'Opção única (radio)',checkbox:'Caixa de seleção (checkbox)'}
 const clamp=(value:number,min:number,max:number)=>Math.round(Math.max(min,Math.min(max,Number.isNaN(value)?min:value)))
 let drag:{pointer:number;field:SheetField;clientX:number;clientY:number;corner?:Corner}|undefined
 
@@ -59,7 +59,7 @@ function addPage(){
   activatePage(pages.length)
 }
 function addField(rect:Rect){
-  if(fieldCount.value>=100)return
+  if(fieldCount.value>=MAX_SHEET_FIELDS)return
   const references=new Set(props.modelValue.pages.flatMap(item=>item.fields.map(field=>field.reference)))
   let index=1
   while(references.has(`campo_${index}`))index++
@@ -149,7 +149,7 @@ function removeBackground(){
 }
 function changeType(field:SheetField,type:FieldType){
   const options=hasOptions(type)&&!field.options.length?['Opção 1','Opção 2']:field.options
-  const previousText=field.type==='text'||field.type==='number'?field.value:''
+  const previousText=field.type==='text'||field.type==='textarea'||field.type==='number'?field.value:''
   const value=type==='checkbox'?'false':type==='bar'?'0':hasOptions(type)?'':previousText
   updateField(field.id,{type,value,options})
 }
@@ -223,15 +223,16 @@ function stopValueEditing(event:KeyboardEvent){
   valueModeButton.value?.focus()
 }
 function trigger(field:SheetField,event:Event,kind:MacroEvent){
-  const target=event.target
-  if(!(target instanceof HTMLInputElement||target instanceof HTMLSelectElement))return
-  if(event instanceof KeyboardEvent){
-    if(event.isComposing)return
-    if(target instanceof HTMLInputElement&&target.type==='text')event.preventDefault()
-    if(event.repeat)return
+  const target=event.target as HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement|null
+  if(!target?.matches('input, select, textarea'))return
+  if(event.type==='keydown'){
+    const key=event as KeyboardEvent
+    if(key.isComposing)return
+    if(target.matches('input[type="text"], input:not([type])'))event.preventDefault()
+    if(key.repeat)return
   }
   if(editing.value||props.disabled)return
-  const value=target instanceof HTMLInputElement&&target.type==='checkbox'?String(target.checked):target.value
+  const value=target.matches('input[type="checkbox"]')?String((target as HTMLInputElement).checked):target.value
   emit('trigger',field.id,kind,value)
 }
 function finishEditing(){editing.value=false;editingValue.value=false;drag=undefined;cancelPlacement()}
@@ -258,7 +259,7 @@ defineExpose({finishEditing})
           @change="backgroundError=false;emit('background',page.id,$event)">
       </label>
       <button v-if="background" type="button" :disabled="disabled" @click="removeBackground">Remover fundo da ficha</button>
-      <button type="button" :disabled="disabled || fieldCount>=100" :aria-pressed="placing" @click="placing ? cancelPlacement() : startPlacement()">{{ placing ? 'Cancelar adição' : '+ Adicionar campo' }}</button>
+      <button type="button" :disabled="disabled || fieldCount>=MAX_SHEET_FIELDS" :aria-pressed="placing" @click="placing ? cancelPlacement() : startPlacement()">{{ placing ? 'Cancelar adição' : '+ Adicionar campo' }}</button>
     </div>
     <p v-if="editing" class="sheet-instruction" aria-live="polite">{{ placing
       ? 'Clique ou arraste sobre a ficha para marcar a área do novo campo. Enter insere com o tamanho padrão.'
@@ -285,6 +286,9 @@ defineExpose({finishEditing})
               <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
                 :aria-label="field.label" :value="field.value" :disabled="disabled" :readonly="field.readOnly" :inputmode="field.type==='number'?'decimal':'text'"
                 :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLInputElement).value})">
+              <textarea v-else-if="field.type==='textarea'" :id="`sheet-value-${field.id}`" class="plain-control"
+                :aria-label="field.label" :value="field.value" :disabled="disabled" :readonly="field.readOnly"
+                :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLTextAreaElement).value})" />
               <div v-else-if="field.type==='bar'" class="bar-control">
                 <input :id="`sheet-value-${field.id}`" type="range" min="0" :max="field.maximum" :value="field.value"
                   :style="{'--fill':`${Number(field.value)/field.maximum*100}%`}"
@@ -414,6 +418,7 @@ defineExpose({finishEditing})
 .field-label { font-size:12px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:none; }
 .field-content .plain-control { width:100%; min-height:0; flex:1; margin:0; padding:0 1px; font-size:var(--field-font,14px); line-height:1; border:1px solid transparent; background:transparent; color:inherit; }
 .field-content .number-control { text-align:center; }
+.field-content textarea.plain-control { resize:none; line-height:1.2; }
 .field-content .plain-control:focus { outline:1px solid #68408c; border-color:#68408c; }
 .field-content select option { background:#fff; color:#211729; }
 .field-content input[type=checkbox], .field-content input[type=radio] { width:auto; align-self:start; margin:2px; accent-color:#68408c; }

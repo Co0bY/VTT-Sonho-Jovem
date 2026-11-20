@@ -4,10 +4,11 @@ export type SheetField={id:string;label:string;reference:string;type:'text'|'num
 export type CharacterSheet={version:1;width:number;height:number;fields:SheetField[]}
 export const emptySheet=():CharacterSheet=>({version:1,width:800,height:1100,fields:[]})
 export const MAX_SHEET_PAGES = 5
+const MAX_SHEET_FIELDS = 120
 export const MAX_SHEET_BYTES = 1_000_000
 export const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
 export const sheetPageParts = Array.from({length:MAX_SHEET_PAGES}, (_, index) => `sheet_page_${index}`)
-export type FieldType = SheetField['type'] | 'bar' | 'select' | 'radio' | 'checkbox'
+export type FieldType = SheetField['type'] | 'textarea' | 'bar' | 'select' | 'radio' | 'checkbox'
 export type PageField = Omit<SheetField, 'type'> & {type:FieldType; height:number; highlight:boolean; hideLabel:boolean; readOnly?:boolean; maximum:number; options:string[]}
 export type SheetPage = {id:string; width:number; height:number; fields:PageField[]; backgroundFile?:string; removeBackground?:boolean}
 type SheetMacro = {
@@ -48,16 +49,16 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
   const inRange = (value:unknown,min:number,max:number):value is number => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
   const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
   const pageIds = new Set<string>(), fieldIds = new Set<string>(), references = new Set<string>()
-  const types:readonly string[] = ['text','number','bar','select','radio','checkbox']
+  const types:readonly string[] = ['text','textarea','number','bar','select','radio','checkbox']
   if(!Array.isArray(raw)||raw.length<1||raw.length>MAX_SHEET_PAGES)return fail()
   let fieldCount=0
   const pages = raw.map((page:unknown):SheetPage=>{
     if(!isRecord(page))return fail()
     const {id,width,height,fields,removeBackground}=page
     if(removeBackground!==undefined&&typeof removeBackground!=='boolean')return fail()
-    if(typeof id!=='string'||!uuid.test(id)||pageIds.has(id)||!inRange(width,400,1600)||!inRange(height,300,4000)||!Array.isArray(fields)||fields.length>100)return fail()
+    if(typeof id!=='string'||!uuid.test(id)||pageIds.has(id)||!inRange(width,400,1600)||!inRange(height,300,4000)||!Array.isArray(fields)||fields.length>MAX_SHEET_FIELDS)return fail()
     fieldCount+=fields.length
-    if(fieldCount>100)return fail()
+    if(fieldCount>MAX_SHEET_FIELDS)return fail()
     pageIds.add(id)
     return {id,width,height,removeBackground,fields:fields.map((field:unknown):PageField=>{
       if(!isRecord(field))return fail()

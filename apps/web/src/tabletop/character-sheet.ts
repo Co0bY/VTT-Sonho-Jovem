@@ -1,9 +1,10 @@
 import type { SheetMacro } from './sheet-macros'
 
 export const MAX_SHEET_PAGES = 5
+export const MAX_SHEET_FIELDS = 120
 const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
 
-export type FieldType = 'text' | 'number' | 'bar' | 'select' | 'radio' | 'checkbox'
+export type FieldType = 'text' | 'textarea' | 'number' | 'bar' | 'select' | 'radio' | 'checkbox'
 export type SheetField = {
   id:string; label:string; reference:string; type:FieldType
   x:number; y:number; width:number; height:number; value:string

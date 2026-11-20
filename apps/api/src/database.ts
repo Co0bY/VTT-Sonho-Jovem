@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnApplicationShutdown } from '@nestjs/common'
 import { Pool } from 'pg'
+import { seedShounensDreamSheet } from './shounens-dream-sheet'
 
 @Injectable()
 export class Database implements OnModuleInit, OnApplicationShutdown {
@@ -18,6 +19,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
           id uuid PRIMARY KEY, name varchar(80) NOT NULL, email varchar(254) UNIQUE NOT NULL,
           password_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
         );
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS is_system boolean NOT NULL DEFAULT false;
         CREATE TABLE IF NOT EXISTS sessions (
           token_hash text PRIMARY KEY, user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           expires_at timestamptz NOT NULL
@@ -322,6 +324,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
         DROP TRIGGER IF EXISTS tabletop_token_character ON tabletop_tokens;
         CREATE TRIGGER tabletop_token_character BEFORE INSERT ON tabletop_tokens FOR EACH ROW EXECUTE FUNCTION initialize_token_character();
       `)
+      await seedShounensDreamSheet(client)
       await client.query('COMMIT')
     } catch (error) { await client.query('ROLLBACK'); throw error }
     finally { client.release() }

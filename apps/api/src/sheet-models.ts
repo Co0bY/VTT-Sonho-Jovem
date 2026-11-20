@@ -1,9 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
+import { open } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { characterSheet, sheetPageParts, type PagedSheet } from './character-sheet'
 import type { CharacterFiles } from './characters'
 import { Database } from './database'
 import { Storage } from './storage'
+import { shounensDreamBackgrounds, shounensDreamModelId } from './shounens-dream-sheet'
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 type SheetModel = { id: string; owner_id: string; name: string; global: 'S' | 'N'; sheet: PagedSheet }
@@ -22,7 +25,7 @@ export class SheetModels {
     return rows
   }
 
-  async create(userId: string, body: Record<string, unknown>, files: CharacterFiles = {}) {
+  async create(userId: string, body: Record<string, unknown> = {}, files: CharacterFiles = {}) {
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const global = body.global === undefined ? 'N' : body.global
     if (!name || name.length > 80) throw new BadRequestException('Informe um nome de até 80 caracteres para o modelo.')
@@ -78,12 +81,12 @@ export class SheetModels {
   }
 
   async detail(userId: string, id: string) {
-    const { sheet } = await this.find(userId, id)
+    const model = await this.find(userId, id)
     return {
-      ...sheet,
-      pages: sheet.pages.map(({ backgroundFile, ...page }) => ({
+      ...model.sheet,
+      pages: model.sheet.pages.map(({ backgroundFile, ...page }) => ({
         ...page,
-        backgroundUrl: backgroundFile ? `/api/modelos-ficha/${id}/fundos/${page.id}` : null,
+        backgroundUrl: backgroundFile ? `/api/modelos-ficha/${model.id}/fundos/${page.id}` : null,
       })),
     }
   }
@@ -92,6 +95,10 @@ export class SheetModels {
     const model = await this.find(userId, id)
     const filename = model.sheet.pages.find(page => page.id === pageId)?.backgroundFile
     if (!filename) throw new NotFoundException('Fundo do modelo não encontrado.')
-    return { filename, file: await this.storage.read(model.owner_id, id, 'outros', filename) }
+    if (model.id === shounensDreamModelId && shounensDreamBackgrounds.some(name => name === filename)) {
+      const file = await open(resolve(__dirname, '../assets/sheet-models/shounens-dream', filename), 'r')
+      return { filename, file }
+    }
+    return { filename, file: await this.storage.read(model.owner_id, model.id, 'outros', filename) }
   }
 }
