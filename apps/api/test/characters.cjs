@@ -86,6 +86,31 @@ async function main(){
   update.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],fields:[{...pages[1].fields[0],...invalid}]}]}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)
  }
+ const macro={fieldId:pages[1].fields[0].id,event:'clique',action:{kind:'rolar',sides:6}}
+ for(const invalid of [[macro,macro],[{...macro,fieldId:randomUUID()}],[{...macro,event:'focus'}],[{...macro,action:{kind:'rolar',sides:1}}]]){
+  const update=form('Regra inválida',player)
+  update.append('sheet',JSON.stringify({...sheetV2,macros:invalid}))
+  await request(`${base}/characters/${empty.id}/settings`,400,update,1)
+ }
+ const groups=[{count:3,sides:6,reduction:'subtrair'},{count:2,sides:8,reduction:'multiplicar'},{count:2,sides:20,reduction:'somar'}]
+ await request(`${base}/messages`,201,{content:'/roll 3d6, 2d8, 2d20',dice:{groups,combine:null}},1)
+ const separate=(await request(base,200,undefined,1)).messages.at(-1).roll
+ const [subtract,multiply,sum]=separate.groups
+ assert.equal(subtract.total,subtract.rolls.reduce((a,b)=>a-b))
+ assert.equal(multiply.total,multiply.rolls.reduce((a,b)=>a*b))
+ assert.equal(sum.total,sum.rolls.reduce((a,b)=>a+b))
+ assert.equal(separate.total,null)
+ await request(`${base}/messages`,400,{content:'/roll d6',dice:{groups:[{count:null,sides:6,reduction:'somar'}],combine:null}},1)
+ const invalidRange={count:3,sides:6,reduction:'sucesso',success:{min:4,max:7}}
+ await request(`${base}/messages`,400,{content:'/roll 3d6',dice:{groups:[invalidRange],combine:null}},1)
+ const invalidMacro=form('Intervalo inválido',player)
+ invalidMacro.append('sheet',JSON.stringify({...sheetV2,macros:[{...macro,action:{kind:'rolar',groups:[invalidRange],combine:null}}]}))
+ await request(`${base}/characters/${empty.id}/settings`,400,invalidMacro,1)
+ for(const targetId of [macro.fieldId,randomUUID()]){
+  const invalidAssignment=form('Destino inválido',player)
+  invalidAssignment.append('sheet',JSON.stringify({...sheetV2,macros:[{...macro,event:'mudanca',action:{kind:'atribuir',targetId}}]}))
+  await request(`${base}/characters/${empty.id}/settings`,400,invalidAssignment,1)
+ }
  const removePageImage=form('Remover fundo da segunda',player)
  removePageImage.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],removeBackground:true,backgroundFile:legacyAgain.sheet_background_url.split('/').pop()}]}))
  const remaining=await request(`${base}/characters/${empty.id}/settings`,201,removePageImage,1)

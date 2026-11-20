@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common'
+import { diceGroups } from './tabletop-rules'
 export type SheetField={id:string;label:string;reference:string;type:'text'|'number';x:number;y:number;width:number;value:string}
 export type CharacterSheet={version:1;width:number;height:number;fields:SheetField[]}
 export const emptySheet=():CharacterSheet=>({version:1,width:800,height:1100,fields:[]})
@@ -7,9 +8,14 @@ export const MAX_SHEET_BYTES = 1_000_000
 export const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
 export const sheetPageParts = Array.from({length:MAX_SHEET_PAGES}, (_, index) => `sheet_page_${index}`)
 export type FieldType = SheetField['type'] | 'bar' | 'select' | 'radio' | 'checkbox'
-export type PageField = Omit<SheetField, 'type'> & {type:FieldType; height:number; highlight:boolean; hideLabel:boolean; maximum:number; options:string[]}
+export type PageField = Omit<SheetField, 'type'> & {type:FieldType; height:number; highlight:boolean; hideLabel:boolean; readOnly?:boolean; maximum:number; options:string[]}
 export type SheetPage = {id:string; width:number; height:number; fields:PageField[]; backgroundFile?:string; removeBackground?:boolean}
-export type PagedSheet = {version:2; pages:SheetPage[]}
+type SheetMacro = {
+  fieldId:string
+  event:'clique'|'enter'|'mudanca'
+  action:{kind:'chat'}|{kind:'atribuir';targetId:string}|{kind:'rolar';sides:number}|({kind:'rolar'} & ReturnType<typeof diceGroups>)
+}
+export type PagedSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]}
 export type StoredSheet = CharacterSheet | PagedSheet
 
 export function characterSheet(raw:unknown):StoredSheet {
@@ -20,7 +26,7 @@ export function characterSheet(raw:unknown):StoredSheet {
   if(!data||typeof data!=='object'||Array.isArray(data))return fail()
   const sheet=data as Record<string,unknown>
   const number=(value:unknown,min:number,max:number):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>=min&&value<=max
-  if(sheet.version===2)return pagedSheet(sheet.pages, fail)
+  if(sheet.version===2)return pagedSheet(sheet.pages, sheet.macros, fail)
   if(sheet.version!==1||!number(sheet.width,400,1600)||!number(sheet.height,300,4000)||!Array.isArray(sheet.fields)||sheet.fields.length>100)return fail()
   const ids=new Set<string>(),references=new Set<string>()
   const fields:SheetField[]=sheet.fields.map((raw:unknown)=>{
@@ -37,7 +43,7 @@ export function characterSheet(raw:unknown):StoredSheet {
   return {version:1,width:sheet.width as number,height:sheet.height as number,fields}
 }
 
-function pagedSheet(raw:unknown, fail:()=>never):PagedSheet {
+function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
   const isRecord = (value:unknown):value is Record<string,unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
   const inRange = (value:unknown,min:number,max:number):value is number => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
   const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
@@ -55,11 +61,11 @@ function pagedSheet(raw:unknown, fail:()=>never):PagedSheet {
     pageIds.add(id)
     return {id,width,height,removeBackground,fields:fields.map((field:unknown):PageField=>{
       if(!isRecord(field))return fail()
-      const {id,label,reference,type,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,maximum,options}=field
+      const {id,label,reference,type,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,readOnly,maximum,options}=field
       if(typeof id!=='string'||!uuid.test(id)||fieldIds.has(id)||typeof reference!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(reference)||references.has(reference))return fail()
       if(typeof label!=='string'||!label.trim()||label.length>60||typeof type!=='string'||!types.includes(type)||typeof value!=='string'||value.length>1000)return fail()
       if(!inRange(fieldWidth,12,width)||!inRange(fieldHeight,12,height)||!inRange(x,0,width-fieldWidth)||!inRange(y,0,height-fieldHeight))return fail()
-      if(typeof highlight!=='boolean'||typeof hideLabel!=='boolean'||!inRange(maximum,1,1000000)||!Number.isInteger(maximum))return fail()
+      if(typeof highlight!=='boolean'||typeof hideLabel!=='boolean'||(readOnly!==undefined&&typeof readOnly!=='boolean')||!inRange(maximum,1,1000000)||!Number.isInteger(maximum))return fail()
       if(!Array.isArray(options)||options.length>20||options.some(o=>typeof o!=='string'||!o.trim()||o.trim()!==o||o.length>60)||new Set(options).size!==options.length)return fail()
       if(type==='number'&&value!==''&&!/^-?(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(value))return fail()
       if(type==='bar'&&(!/^\d+$/.test(value)||!inRange(Number(value),0,maximum)))return fail()
@@ -67,8 +73,30 @@ function pagedSheet(raw:unknown, fail:()=>never):PagedSheet {
       if(type==='checkbox'&&value!=='true'&&value!=='false')return fail()
       fieldIds.add(id)
       references.add(reference)
-      return {id,label:label.trim(),reference,type:type as FieldType,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,maximum,options}
+      return {id,label:label.trim(),reference,type:type as FieldType,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,...(readOnly===undefined?{}:{readOnly}),maximum,options}
     })}
   })
-  return {version:2,pages}
+  if(macros===undefined)return {version:2,pages}
+  const invalidMacro=():never=>{throw new BadRequestException('Regra da ficha inválida. Confira o campo, o evento e a ação.')}
+  if(!Array.isArray(macros)||macros.length>100)return invalidMacro()
+  const rules=new Set<string>()
+  const validated=macros.map((rule:unknown):SheetMacro=>{
+    if(!isRecord(rule))return invalidMacro()
+    const {fieldId,event,action}=rule
+    if(typeof fieldId!=='string'||!fieldIds.has(fieldId)||
+      (event!=='clique'&&event!=='enter'&&event!=='mudanca')||!isRecord(action))return invalidMacro()
+    const key=`${fieldId}/${event}`
+    if(rules.has(key))return invalidMacro()
+    rules.add(key)
+    if(action.kind==='atribuir'&&typeof action.targetId==='string'&&fieldIds.has(action.targetId)&&action.targetId!==fieldId){
+      return {fieldId,event,action:{kind:'atribuir',targetId:action.targetId}}
+    }
+    if(action.kind==='chat')return {fieldId,event,action:{kind:'chat'}}
+    if(action.kind==='rolar'&&action.groups!==undefined)return {fieldId,event,action:{kind:'rolar',...diceGroups(action,true)}}
+    if(action.kind==='rolar'&&inRange(action.sides,2,1000)&&Number.isInteger(action.sides)){
+      return {fieldId,event,action:{kind:'rolar',sides:action.sides}}
+    }
+    return invalidMacro()
+  })
+  return {version:2,pages,macros:validated}
 }

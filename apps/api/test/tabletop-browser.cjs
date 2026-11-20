@@ -73,7 +73,7 @@ async function main() {
   await page.getByRole('tab',{name:'Anotações',exact:true}).click()
   await page.getByRole('textbox',{name:'Anotações',exact:true}).fill('Investigar as ruínas.')
   await page.getByRole('tab',{name:'Configurações da ficha',exact:true}).click()
-  assert.equal(await page.getByRole('tabpanel',{name:'Configurações da ficha',exact:true}).innerText(),'')
+  await page.getByRole('button',{name:'Blocos',exact:true}).waitFor()
   await page.getByRole('tab',{name:'Ficha',exact:true}).click()
   await page.getByRole('button',{name:'Editar ficha',exact:true}).click()
   await page.getByLabel('Imagem de fundo da ficha',{exact:true}).setInputFiles({name:'ficha.png',mimeType:'image/png',buffer:sampleImage(80,110)})
