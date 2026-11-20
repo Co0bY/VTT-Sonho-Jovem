@@ -111,6 +111,7 @@ function applySheetModel(model: CharacterSheet, backgrounds: Map<string, File>) 
   macroStatus.value = ''
 }
 const sheetEditor=ref<InstanceType<typeof CharacterSheetEditor>>()
+const modalTarget = shallowRef<HTMLElement>()
 const sheetWindowTarget = shallowRef<HTMLElement>()
 let sheetWindow: Window | undefined
 
@@ -121,12 +122,16 @@ function closeSheetWindow() {
   popup?.close()
 }
 
-function openSheetWindow() {
+function focusSheetWindow() {
   if (sheetWindow && !sheetWindow.closed) {
     sheetWindow.focus()
-    return
+    return true
   }
+  return false
+}
+defineExpose({ focusSheetWindow })
 
+function openSheetWindow() {
   const popup = window.open('', '_blank', 'popup,width=1160,height=850,resizable=yes,scrollbars=yes')
   if (!popup) {
     localError.value = 'Permita pop-ups para abrir a ficha em uma nova janela.'
@@ -155,6 +160,7 @@ function openSheetWindow() {
     if (sheetWindow === popup) {
       sheetWindow = undefined
       sheetWindowTarget.value = undefined
+      emit('close')
     }
   }, { once: true })
 }
@@ -212,11 +218,17 @@ async function save(){
 onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)release(kind)})
 </script>
 <template>
-  <q-dialog :model-value="open" :persistent="busy" @update:model-value="emit('close')"><q-card class="modal character-dialog"><q-card-section>
+  <q-dialog :model-value="open && !sheetWindowTarget" :persistent="busy" :no-refocus="!!sheetWindowTarget"
+    @update:model-value="value => { if (!value && !sheetWindowTarget) emit('close') }">
+    <q-card class="modal character-dialog"><div ref="modalTarget" /></q-card>
+  </q-dialog>
+  <Teleport v-if="open && (sheetWindowTarget || modalTarget)" :to="sheetWindowTarget ?? modalTarget">
+  <q-card-section class="character-dialog-content" :class="{ 'sheet-window': sheetWindowTarget }">
     <header class="character-dialog-header">
-      <div><span class="eyebrow">PERSONAGENS DA CAMPANHA</span><h2>{{ character ? 'Editar personagem' : 'Novo personagem' }}</h2></div>
-      <button type="button" class="text-button sheet-window-button" aria-label="Abrir ficha em nova janela"
-        title="Abrir ficha em nova janela" @click="openSheetWindow">
+      <h2 v-if="sheetWindowTarget">{{ name.trim() || 'Ficha do personagem' }}</h2>
+      <div v-else><span class="eyebrow">PERSONAGENS DA CAMPANHA</span><h2>{{ character ? 'Editar personagem' : 'Novo personagem' }}</h2></div>
+      <button v-if="!sheetWindowTarget" type="button" class="text-button sheet-window-button" aria-label="Abrir ficha em nova janela"
+        title="Abrir ficha em nova janela" :disabled="busy" @click="openSheetWindow">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M13 5h6v6m0-6-9 9m0-9H5v14h14v-5"/></svg>
       </button>
     </header>
@@ -240,18 +252,12 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
       <label class="character-color">Cor de identificação<input v-model="color" type="color" :disabled="busy"></label>
       <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
       </section>
-      <Teleport :to="sheetWindowTarget" :disabled="!sheetWindowTarget">
-        <section v-show="sheetWindowTarget || tab === 'sheet'" aria-label="Ficha"
-          :role="sheetWindowTarget ? undefined : 'tabpanel'" :class="{ 'sheet-window': sheetWindowTarget }">
-          <h1 v-if="sheetWindowTarget">{{ name.trim() || 'Ficha do personagem' }}</h1>
+        <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha">
           <CharacterSheetModels v-if="open" :key="character?.id" :sheet="sheet" :background-for="pageBackground"
             :disabled="busy || pendingImages.size > 0" @busy="modelBusy = $event" @import="applySheetModel" />
           <CharacterSheetEditor v-if="open" :key="sheetRevision" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :disabled="busy || modelBusy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
           <p v-if="macroStatus" role="status">{{ macroStatus }}</p>
-          <p v-if="sheetWindowTarget && (localError || error)" role="alert" class="character-error">{{ localError || error }}</p>
         </section>
-      </Teleport>
-      <p v-if="tab === 'sheet' && sheetWindowTarget">A ficha está aberta em outra janela.</p>
       <section v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">
         <CharacterTextEditor v-model="notes" label="Anotações" :disabled="busy" />
       </section>
@@ -262,17 +268,18 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
       <p v-if="localError || error" role="alert" class="character-error">{{ localError || error }}</p>
       <div class="modal-actions"><button type="button" class="text-button" :disabled="busy" @click="emit('close')">Cancelar</button><button class="primary" :disabled="busy || modelBusy">{{ character ? 'Salvar personagem' : 'Criar personagem' }}</button></div>
     </form>
-  </q-card-section></q-card></q-dialog>
+  </q-card-section>
+  </Teleport>
 </template>
 <style scoped>
 .character-dialog-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
 .sheet-window-button { display:grid; place-items:center; }
 .sheet-window-button:hover { background:#ffffff12; border-radius:8px; }
 .sheet-window { padding:clamp(12px,3vw,32px); }
-.sheet-window h1 { font-size:24px; line-height:1.3; margin-bottom:16px; }
-.sheet-window :deep(.sheet-viewport) { max-height:calc(100dvh - 190px); min-height:180px; }
+.character-dialog-header h2 { font-size:24px; line-height:1.3; margin:12px 0 22px; }
+.sheet-window :deep(.sheet-viewport) { max-height:calc(100dvh - 300px); min-height:180px; }
 
 .character-tabs{margin-bottom:20px;border-bottom:1px solid #59436a;color:#d8c0ed}.character-tabs :deep(.q-tab){font-size:13px;padding:0 12px}.character-tabs :deep(.q-tab--active){color:#e4c7ff}.character-editor textarea{display:block;width:100%;min-height:180px;resize:vertical;padding:12px;border:1px solid #59436a;border-radius:8px;background:#17111e;color:#eadff3;font:inherit;line-height:1.7;margin-top:8px}.character-editor textarea:focus{outline:2px solid #b48ce9;outline-offset:2px}
 
-.modal.character-dialog{width:1160px;max-width:94vw;height:90vh;overflow:auto}.character-dialog h2{font-size:24px;margin:12px 0 22px}.character-images{display:grid;grid-template-columns:1fr 1fr;gap:16px}.character-images fieldset{min-width:0;border:1px solid #59436a;border-radius:10px;padding:12px}.character-images legend{color:#d8c0ed;font-size:14px;padding:0 7px}.character-image-preview{height:145px;background:#15101d;border-radius:8px;display:grid;place-items:center;overflow:hidden;color:#c2a2e4;font-size:44px}.character-image-preview img{width:100%;height:100%;object-fit:contain}.token-preview img{max-width:130px;max-height:130px}.character-images label{font-size:11px;margin:12px 0}.character-images input[type=file]{padding:7px;font-size:10px;max-width:100%}.character-images p,.character-hint{font-size:11px!important;color:#ad96bc;line-height:1.7}.character-images button{font-size:11px;padding:6px 0}.character-hint{margin:12px 0}.character-dialog select{width:100%;padding:12px;border:1px solid #59436a;background:#17111e;color:#eadff3;border-radius:7px}.character-color{display:flex;align-items:center;justify-content:space-between}.character-color input{width:55px;height:35px;padding:3px;margin:0}.character-error{color:#ffc0d0!important}@media(max-width:480px){.character-images{gap:8px}.character-images fieldset{padding:8px}.character-image-preview{height:110px}.character-images input[type=file]{font-size:9px}}
+.modal.character-dialog{width:1160px;max-width:94vw;height:90vh;overflow:auto}.character-images{display:grid;grid-template-columns:1fr 1fr;gap:16px}.character-images fieldset{min-width:0;border:1px solid #59436a;border-radius:10px;padding:12px}.character-images legend{color:#d8c0ed;font-size:14px;padding:0 7px}.character-image-preview{height:145px;background:#15101d;border-radius:8px;display:grid;place-items:center;overflow:hidden;color:#c2a2e4;font-size:44px}.character-image-preview img{width:100%;height:100%;object-fit:contain}.token-preview img{max-width:130px;max-height:130px}.character-images label{font-size:11px;margin:12px 0}.character-images input[type=file]{padding:7px;font-size:10px;max-width:100%}.character-images p,.character-hint{font-size:11px!important;color:#ad96bc;line-height:1.7}.character-images button{font-size:11px;padding:6px 0}.character-hint{margin:12px 0}.character-dialog-content #character-owner{width:100%;padding:12px;border:1px solid #59436a;background:#17111e;color:#eadff3;border-radius:7px}.character-color{display:flex;align-items:center;justify-content:space-between}.character-color input{width:55px;height:35px;padding:3px;margin:0}.character-error{color:#ffc0d0!important}@media(max-width:480px){.character-images{gap:8px}.character-images fieldset{padding:8px}.character-image-preview{height:110px}.character-images input[type=file]{font-size:9px}}
 </style>

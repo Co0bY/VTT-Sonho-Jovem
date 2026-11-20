@@ -51,12 +51,24 @@ async function main(){
   page.getByRole('button',{name:'Abrir ficha em nova janela',exact:true}).click(),
  ])
  await sheetWindow.getByRole('heading',{name:'Força de teste',exact:true}).waitFor()
+ await modal.waitFor({state:'hidden'})
+ await page.getByRole('button',{name:'Chat',exact:true}).click()
+ await page.getByRole('button',{name:'Personagens',exact:true}).click()
+ await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
+ await modal.waitFor({state:'hidden'})
  const detachedBackground=sheetWindow.getByRole('img',{name:'Fundo da ficha',exact:true})
  await detachedBackground.waitFor()
  await detachedBackground.evaluate(img=>img.decode())
  await sheetWindow.getByRole('button',{name:'+ Adicionar campo',exact:true}).click()
- await sheetWindow.close()
- await page.getByRole('button',{name:'Cancelar adição',exact:true}).click()
+ await sheetWindow.getByRole('button',{name:'Cancelar adição',exact:true}).waitFor()
+ await Promise.all([
+  sheetWindow.waitForEvent('close'),
+  sheetWindow.getByRole('button',{name:'Salvar personagem',exact:true}).click(),
+ ])
+ await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
+ await page.getByRole('tab',{name:'Ficha',exact:true}).click()
+ await page.getByRole('img',{name:'Fundo da ficha',exact:true}).evaluate(img=>img.decode())
+ await page.getByRole('button',{name:'Editar ficha',exact:true}).click()
  await drawField(320,140,35,22)
  await page.getByLabel('Rótulo do campo',{exact:true}).fill('Força')
  assert.equal(await page.locator('.sheet-field.selected').count(),1)
@@ -353,11 +365,22 @@ async function main(){
  assert.ok(officialSheet.pages.every(item=>item.backgroundUrl.includes(`/characters/${character.id}/images/sheet/`)))
  await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
  await page.getByRole('tab',{name:'Ficha',exact:true}).click()
- await expectChat(()=>page.getByRole('button',{name:'Executar macro de Habilidade',exact:true}).click())
+ const [officialWindow]=await Promise.all([
+  page.waitForEvent('popup'),
+  page.getByRole('button',{name:'Abrir ficha em nova janela',exact:true}).click(),
+ ])
+ const diceButton=officialWindow.getByRole('button',{name:'Executar macro de Habilidade',exact:true})
+ await diceButton.locator('svg').waitFor()
+ assert.equal(await officialWindow.getByRole('button',{name:'Executar macro de Nome',exact:true}).count(),0)
+ await expectChat(()=>diceButton.click())
  const officialRoll=(await request('')).messages.at(-1).roll.groups[0]
  assert.equal(officialRoll.rolls.length,3)
  assert.equal(officialRoll.success.min,5)
  assert.equal(officialRoll.success.max,6)
+ await officialWindow.close()
+ await modal.waitFor({state:'hidden'})
+ await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
+ await modal.waitFor()
 
  assert.deepEqual(errors,[])
  console.log('PASS ficha no navegador: edição, macros, salvamento de modelos e importação da ficha oficial de Shounen’s Dream.')

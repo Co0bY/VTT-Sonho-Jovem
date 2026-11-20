@@ -312,7 +312,12 @@ defineExpose({finishEditing})
             <button v-if="!editing && clickMacros.has(field.id)" type="button" class="macro-trigger"
               :class="{ 'macro-trigger-left':field.x>=28 && field.x+field.width+28>page.width }"
               :disabled="disabled" :aria-label="`Executar macro de ${field.label}`" :title="`Executar macro de ${field.label}`"
-              @click="emit('trigger',field.id,'clique',field.value)"><span aria-hidden="true">▶</span></button>
+              @click="emit('trigger',field.id,'clique',field.value)">
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2 21 7v10l-9 5-9-5V7l9-5Zm0 0L7 15m5-13 5 13M3 7l4 8-4 2m18-10-4 8 4 2M7 15h10l-5 7-5-7Z" />
+              </svg>
+            </button>
             <template v-if="editing">
               <button v-if="!(editingValue && selectedId===field.id)" type="button" class="move-handle" :disabled="disabled || placing" :aria-label="`Mover campo ${field.label}`"
                 @focus="selectedId=field.id" @click="selectedId=field.id" @keydown="keyboard($event,field)"

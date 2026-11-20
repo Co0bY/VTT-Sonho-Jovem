@@ -22,6 +22,7 @@ const presentationCard=ref<CharacterCard|null>(null),presentationError=ref('')
 const presentationQueue:CharacterCard[]=[]
 let presentationCursor:string|undefined
 const characterDialog=ref(false),characterTarget=ref<Character|null>(null)
+const characterEditor = ref<InstanceType<typeof CharacterDialog>>()
 
 const editingLayer=ref<Layer>('geral'),objectName=ref(''),objectFile=ref<File>(),objectInput=ref<HTMLInputElement>()
 const transformTarget=ref<{id:string;name:string;rect:Rect;layer:Layer}|null>(null)
@@ -82,7 +83,10 @@ async function presentCard(characterId:string){
   const ok=await action(async()=>{await api(`${endpoint}/characters/${characterId}/present`,{})})
   if(!ok)presentationError.value=error.value
 }
-function openCharacter(character:Character|null=null){error.value='';characterTarget.value=character;characterDialog.value=true}
+function openCharacter(character:Character|null=null){
+  if (characterEditor.value?.focusSheetWindow()) return
+  error.value='';characterTarget.value=character;characterDialog.value=true
+}
 async function saveCharacter(characterId:string|null,data:FormData){return action(async()=>{await api(characterId?`${endpoint}/characters/${characterId}/settings`:`${endpoint}/characters`,data)})}
 async function placeCharacter(characterId:string,point?:Point){
   const character=state.value?.characters.find(character=>character.id===characterId)
@@ -151,7 +155,7 @@ onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(
         </aside>
       </div><footer class="table-status"><span><i></i>{{ busy ? 'Salvando…' : error || networkError ? 'Falha de atualização' : 'Alterações salvas no servidor' }}</span><span>Protótipo · atualização a cada 2 s <b>✦ SONHO JOVEM</b></span></footer>
     <CharacterCardDialog :card="presentationCard" :master="master" :busy="busy" :error="presentationError" @close="closeCard" @present="presentCard" />
-    <CharacterDialog :master="master" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
+    <CharacterDialog ref="characterEditor" :master="master" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
     <ImageTransformDialog :scene="state.scene" :target="transformTarget" :busy="busy" :error="error" :save="transformImage" :remove="removeObject" @close="transformTarget = null" /></template>
   </div>
 </template>

@@ -2,15 +2,17 @@
 
 O modal do personagem usa a mesma largura e altura nas quatro abas, com limites proporcionais à tela. O botão no canto superior direito exibe um ícone de abertura externa e o tooltip “Abrir ficha em nova janela”.
 
-A nova janela mostra a ficha do personagem aberto. O Vue usa Teleport para mover o editor existente entre a mesa e a janela, mantendo a página selecionada, as imagens de fundo e as alterações em andamento. Ao fechar a janela, o editor volta à aba Ficha. O botão Salvar personagem continua no modal da mesa. Se o navegador bloquear a abertura, o modal informa como liberar o pop-up.
+Ao abrir a ficha em uma nova janela, o modal fecha e a mesa volta a aceitar interações. O Vue usa Teleport para mover o formulário existente, mantendo a página selecionada, os fundos e as alterações em andamento. As abas e o botão **Salvar personagem** ficam disponíveis no pop-up. Fechar o pop-up encerra a edição. Se o navegador bloquear a abertura, o modal permanece aberto e informa como liberar o pop-up.
+
+Os campos com macro de clique ganham um botão com ícone de d20 ao lado do controle. O botão executa a ação configurada e o tooltip identifica o campo.
 
 ## Como conferir
 
 1. Na mesa, abra Personagens e edite um personagem. Alterne entre as abas e confira que o modal mantém suas dimensões.
 2. Passe o mouse sobre o ícone no canto superior direito e clique. Redimensione a janela pelo navegador.
-3. Mude de página ou altere um campo na janela. Feche a janela e confira que a ficha voltou à mesa com o estado preservado.
-4. Salve pelo modal se quiser persistir as alterações.
+3. Confira que a mesa está livre para uso enquanto o pop-up está aberto. Alterne entre abas e edite a ficha pela nova janela.
+4. Use o d20 ao lado de um campo com macro de clique e confira a execução. Salve pelo pop-up para persistir as alterações. Após salvar ou fechar a janela, o modal continua fechado.
 
-A checagem de tipos e o build do frontend passaram. O teste `pnpm --filter @vtt/api test:sheet-browser` inclui a conferência do tamanho do modal, o carregamento do fundo ainda em rascunho na nova janela e o retorno do editor ao modal.
+O teste `pnpm --filter @vtt/api test:sheet-browser` verifica as dimensões do modal, o desbloqueio da mesa, o carregamento de fundo em rascunho, o salvamento pelo pop-up e a execução de macro pelo d20.
 
 O teste de navegador passou no Chromium. O Ubuntu estava sem as bibliotecas NSPR, NSS e ALSA exigidas pelo navegador. Para executar a validação, os pacotes foram extraídos em uma pasta temporária e disponibilizados ao processo via `LD_LIBRARY_PATH`.
