@@ -16,3 +16,5 @@ A API guarda os vínculos entre os campos por identificador em `techniques`, ass
 ## Como verificar
 
 Aplique o modelo Shounen’s Dream a um personagem de teste e coloque 3 em Habilidade. Na página 2, preencha uma técnica Fogo com alcance CaC e descrição. O nível 1 mostra custo 4 e o nível 20 mostra 80. Com o nível 20, confirme no chat que o ataque rolou 23d6. Se acertar após a defesa, role 21d6 mais o número de acertos. Salve a ficha como modelo e verifique que uma nova cópia mantém os seletores e botões com os campos em branco.
+
+O workspace passou em `pnpm build`, `pnpm --filter @vtt/web typecheck` e nos 22 testes de `pnpm --filter @vtt/web test`. A suíte `pnpm --filter @vtt/api test:characters` verificou que uma cópia preserva a configuração e limpa os valores. A suíte `pnpm --filter @vtt/api test:sheet-browser` passou no Chromium com as bibliotecas locais de execução carregadas. Ela verifica a ficha após salvar, a descrição no chat, os dados do atributo e o dano baseado nos acertos recebidos do servidor.
