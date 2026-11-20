@@ -100,8 +100,26 @@ async function main(){
  const official=visibleModels.find(model=>model.name==='Shounen’s Dream'&&model.author==='Sistema')
  assert.equal(official?.global,'S')
  const officialLayout=await request(`modelos-ficha/${official.id}`,200,undefined,2)
- assert.deepEqual(officialLayout.pages.map(page=>page.fields.length),[27,48,32])
+ assert.deepEqual(officialLayout.pages.map(page=>page.fields.length),[27,56,32])
  assert.equal(officialLayout.macros.length,5)
+ assert.equal(officialLayout.techniques.rows.length,8)
+ const technique=officialLayout.techniques.rows[0]
+ const templateSheet={...officialLayout,pages:officialLayout.pages.map(page=>({
+  ...page,fields:page.fields.map(field=>field.id===technique.name?{...field,value:'Pedra em chamas'}:field),
+ }))}
+ const techniqueModel=new FormData()
+ techniqueModel.append('name','Técnicas reutilizáveis')
+ techniqueModel.append('sheet',JSON.stringify(templateSheet))
+ const libraryCopy=await request('modelos-ficha',201,techniqueModel)
+ const copiedLayout=await request(`modelos-ficha/${libraryCopy.id}`,200)
+ assert.deepEqual(copiedLayout.techniques,officialLayout.techniques)
+ assert.equal(copiedLayout.pages[1].fields.find(field=>field.id===technique.name).value,'')
+ const invalidTechniqueModel=new FormData()
+ invalidTechniqueModel.append('name','Técnica inválida')
+ invalidTechniqueModel.append('sheet',JSON.stringify({...templateSheet,techniques:{
+  ...templateSheet.techniques,rows:[{...technique,level:randomUUID()}],
+ }}))
+ await request('modelos-ficha',400,invalidTechniqueModel)
  for(const page of officialLayout.pages)await asset(page.backgroundUrl,200,2)
  const system=(await db.query('SELECT id, email, is_system, password_hash FROM users WHERE email=$1',['sistema@vtt.invalid'])).rows[0]
  assert.ok(system.is_system)

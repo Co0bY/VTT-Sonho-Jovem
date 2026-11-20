@@ -4,11 +4,12 @@ import CharacterSheetMacros from './CharacterSheetMacros.vue'
 import { macroMessage, type MacroEvent, type MacroMessage } from '../tabletop/sheet-macros'
 import CharacterSheetEditor from './CharacterSheetEditor.vue'
 import CharacterSheetModels from './CharacterSheetModels.vue'
-import { editableSheet, fieldValueError, sheetError, type CharacterSheet } from '../tabletop/character-sheet'
+import { editableSheet, fieldValueError, sheetError, type CharacterSheet, type Technique } from '../tabletop/character-sheet'
 import CharacterTextEditor from './CharacterTextEditor.vue'
 import { editorHtml } from '../tabletop/rich-text'
-import type { Character, Member } from '../tabletop/types'
-const props=defineProps<{open:boolean;master:boolean;character:Character|null;members:Member[];userId:string;busy:boolean;error:string;save:(id:string|null,data:FormData)=>Promise<boolean>;sendMacro:(message:MacroMessage)=>Promise<unknown>}>()
+import { techniqueAttack, techniqueCost, techniqueDamage } from '../tabletop/sheet-techniques'
+import type { Character, Member, Message } from '../tabletop/types'
+const props=defineProps<{open:boolean;master:boolean;character:Character|null;members:Member[];userId:string;busy:boolean;error:string;save:(id:string|null,data:FormData)=>Promise<boolean>;sendMacro:(message:MacroMessage)=>Promise<Pick<Message,'roll'>>}>()
 const emit=defineEmits<{close:[]}>()
 const name=ref(''),owner=ref(''),color=ref('#a47ae2'),localError=ref('')
 const tab=ref('card'),description=ref(''),notes=ref('')
@@ -47,6 +48,49 @@ async function runMacro(fieldId:string,event:MacroEvent,value:string){
     macroStatus.value='Ação enviada ao chat da mesa.'
   }catch(error){
     localError.value=(error as Error).message
+  }
+}
+const techniqueBusy=ref(false)
+const techniqueHits=ref(new Map<string,{key:string;hits:number}>())
+const fieldsById=computed(()=>new Map(macroFields.value.map(field=>[field.id,field])))
+function techniqueValues(row:Technique){
+  const value=(id:string|undefined)=>id ? fieldsById.value.get(id)?.value.trim() ?? '' : ''
+  const attribute=value(row.attribute)
+  const score=value(sheet.value.techniques?.attributes[attribute])
+  const data={name:value(row.name),level:value(row.level),element:value(row.element),
+    range:value(row.range),effect:value(row.effect),attribute,score}
+  return {...data,key:JSON.stringify(data)}
+}
+const damageReady=computed(()=>new Set(sheet.value.techniques?.rows.filter(row=>{
+  const result=techniqueHits.value.get(row.attribute)
+  return result && result.key===techniqueValues(row).key
+}).map(row=>row.attribute)))
+async function rollTechnique(row:Technique,action:'attack'|'damage'){
+  if(techniqueBusy.value)return
+  const results=techniqueHits.value
+  const data=techniqueValues(row)
+  techniqueBusy.value=true
+  localError.value=''
+  macroStatus.value=''
+  try{
+    if(action==='damage'){
+      const result=results.get(row.attribute)
+      if(!result || result.key!==data.key)throw new Error('Role o ataque desta técnica antes do dano.')
+      await props.sendMacro(techniqueDamage(data.level,result.hits,`Dano · ${data.name}`))
+      results.delete(row.attribute)
+    }else{
+      if(!data.name||!data.element||!data.attribute)throw new Error('Preencha o nome, o elemento e o atributo da técnica.')
+      const details=[data.element,`Nível ${data.level}`,`${techniqueCost(data.level)} Ki/Mana`,data.range,data.attribute].filter(Boolean)
+      const caption=[`Ataque · ${data.name} (${details.join(' · ')})`,data.effect].filter(Boolean).join('\n')
+      const {roll}=await props.sendMacro(techniqueAttack(data.score,data.level,caption))
+      results.delete(row.attribute)
+      if(roll?.total)results.set(row.attribute,{key:data.key,hits:roll.total})
+    }
+    macroStatus.value='Rolagem enviada ao chat da mesa.'
+  }catch(error){
+    localError.value=(error as Error).message
+  }finally{
+    techniqueBusy.value=false
   }
 }
 const pageUploads=reactive(new Map<string,{file:File;url:string}>())
@@ -106,6 +150,7 @@ function applySheetModel(model: CharacterSheet, backgrounds: Map<string, File>) 
     pageUploads.set(id, { file, url: URL.createObjectURL(file) })
   }
   sheet.value = model
+  techniqueHits.value = new Map()
   importedSheet.value = true
   sheetRevision.value++
   macroStatus.value = ''
@@ -175,6 +220,7 @@ function release(kind:Kind){if(previews[kind].startsWith('blob:'))URL.revokeObje
 watch(()=>[props.open,props.character?.id],()=>{
   closeSheetWindow()
   modelBusy.value = false
+  techniqueHits.value = new Map()
   importedSheet.value = false
   releasePages()
   macroStatus.value=''
@@ -255,7 +301,7 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
         <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha">
           <CharacterSheetModels v-if="open" :key="character?.id" :sheet="sheet" :background-for="pageBackground"
             :disabled="busy || pendingImages.size > 0" @busy="modelBusy = $event" @import="applySheetModel" />
-          <CharacterSheetEditor v-if="open" :key="sheetRevision" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :disabled="busy || modelBusy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
+          <CharacterSheetEditor v-if="open" :key="sheetRevision" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :damage-ready="damageReady" :technique-busy="techniqueBusy" @technique-roll="rollTechnique" :disabled="busy || modelBusy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
           <p v-if="macroStatus" role="status">{{ macroStatus }}</p>
         </section>
       <section v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">

@@ -14,7 +14,11 @@ export type SheetPage = {
   id:string; width:number; height:number; fields:SheetField[]
   backgroundUrl?:string | null; removeBackground?:boolean
 }
-export type CharacterSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]}
+export type Technique = Record<'name'|'level'|'element'|'cost'|'range'|'effect'|'attribute', string>
+export type CharacterSheet = {
+  version:2; pages:SheetPage[]; macros?:SheetMacro[]
+  techniques?:{attributes:Record<string,string>; rows:Technique[]}
+}
 type LegacySheet = {
   version:1; width:number; height:number
   fields:Omit<SheetField,'height'|'highlight'|'hideLabel'|'maximum'|'options'>[]

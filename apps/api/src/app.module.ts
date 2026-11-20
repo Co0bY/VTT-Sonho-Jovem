@@ -486,7 +486,12 @@ class ApiController {
     const command = literal===true ? null : /^\/(?:roll|r)\s+(.+)$/i.exec(content)
     if (literal!==true && content.startsWith('/') && !command) throw new BadRequestException('Comando desconhecido. Use /roll 1d20 ou envie uma mensagem.')
     const roll = dice!==undefined ? rollDiceGroups(dice) : command ? rollDice(command[1]) : null
-    return (await this.db.pool.query('INSERT INTO tabletop_messages(campaign_id,user_id,content,roll) VALUES($1,$2,$3,$4) RETURNING id::text', [id, access.user.id, content, roll ? JSON.stringify(roll) : null])).rows[0]
+    const caption = roll && Object.hasOwn(body as object, 'caption') ? field(body, 'caption', 1, 2000) : content
+    const { rows } = await this.db.pool.query(
+      'INSERT INTO tabletop_messages(campaign_id,user_id,content,roll) VALUES($1,$2,$3,$4) RETURNING id::text, roll',
+      [id, access.user.id, caption, roll ? JSON.stringify(roll) : null],
+    )
+    return rows[0]
   }
   @Post('campaigns/:id/invitations') async invite(@Param('id') id: string, @Req() req: Request) {
     this.accounts.mutation(req)

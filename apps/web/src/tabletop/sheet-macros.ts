@@ -7,7 +7,7 @@ export type DiceAction={kind:'rolar';groups:DiceGroup[];combine:Reduction|null}
 export type MacroAction=DiceAction|{kind:'rolar';sides:number}|{kind:'chat'}|{kind:'atribuir';targetId:string}
 export type SheetMacro={fieldId:string;event:MacroEvent;action:MacroAction}
 export type MacroField={id:string;reference:string;label:string}
-export type MacroMessage={content:string;literal?:true;dice?:{groups:(Omit<DiceGroup,'count'>&{count:number})[];combine:Reduction|null}}
+export type MacroMessage={content:string;caption?:string;literal?:true;dice?:{groups:(Omit<DiceGroup,'count'>&{count:number})[];combine:Reduction|null}}
 export const MAX_DICE_GROUPS=10
 
 export function diceAction(action:Extract<MacroAction,{kind:'rolar'}>):DiceAction {

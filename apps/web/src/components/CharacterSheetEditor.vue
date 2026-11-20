@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import type { CharacterSheet, FieldType, SheetField, SheetPage } from '../tabletop/character-sheet'
+import type { CharacterSheet, FieldType, SheetField, SheetPage, Technique } from '../tabletop/character-sheet'
+import { techniqueCost } from '../tabletop/sheet-techniques'
 import type { MacroEvent } from '../tabletop/sheet-macros'
 import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_FIELDS, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
 
-const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;clickMacros:ReadonlySet<string>}>()
+const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;clickMacros:ReadonlySet<string>;damageReady:ReadonlySet<string>;techniqueBusy:boolean}>()
 const emit=defineEmits<{
-  'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string];trigger:[fieldId:string,event:MacroEvent,value:string]
+  'techniqueRoll':[row:Technique,action:'attack'|'damage'];'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string];trigger:[fieldId:string,event:MacroEvent,value:string]
 }>()
 const editing=ref(false)
 const placing=ref(false)
@@ -31,6 +32,15 @@ const viewport=ref<HTMLElement>()
 const backgroundError=ref(false)
 const page=computed(()=>props.modelValue.pages[pageIndex.value]!)
 const background=computed(()=>props.backgroundFor(page.value.id))
+const techniquesByAttribute=computed(()=>new Map(props.modelValue.techniques?.rows.map(row=>[row.attribute,row])))
+function triggerTechnique(id:string,action:'attack'|'damage'){
+  const row=techniquesByAttribute.value.get(id)
+  if(row)emit('techniqueRoll',row,action)
+}
+const techniqueCosts=computed(()=>{
+  const fields=new Map(page.value.fields.map(field=>[field.id,field.value]))
+  return new Map(props.modelValue.techniques?.rows.map(row=>[row.cost,techniqueCost(fields.get(row.level)??'')]))
+})
 const selected=computed(()=>page.value.fields.find(field=>field.id===selectedId.value))
 const fieldCount=computed(()=>props.modelValue.pages.reduce((count,item)=>count+item.fields.length,0))
 const validation=computed(()=>sheetError(props.modelValue))
@@ -135,9 +145,13 @@ function selectField(id:string){
   board.value?.querySelector<HTMLElement>(`[data-sheet-field="${id}"]`)?.scrollIntoView({block:'nearest',inline:'nearest'})
 }
 function removeField(){
+  const techniques=props.modelValue.techniques
+  const rows=techniques?.rows.filter(row=>!Object.values(row).includes(selectedId.value))
+  const attributes=Object.fromEntries(Object.entries(techniques?.attributes??{}).filter(([,id])=>id!==selectedId.value))
   emit('update:modelValue',{
     ...props.modelValue,
     pages:props.modelValue.pages.map(item=>item.id===page.value.id?{...item,fields:item.fields.filter(field=>field.id!==selectedId.value)}:item),
+    techniques:rows?.length&&Object.keys(attributes).length?{rows,attributes}:undefined,
     macros:props.modelValue.macros?.filter(rule=>rule.fieldId!==selectedId.value&&(rule.action.kind!=='atribuir'||rule.action.targetId!==selectedId.value)),
   })
   selectedId.value=''
@@ -283,7 +297,8 @@ defineExpose({finishEditing})
               @keydown.enter="trigger(field,$event,'enter')" @change="trigger(field,$event,'mudanca')">
               <span v-if="!field.hideLabel && field.type==='radio'" class="field-label">{{ field.label }}</span>
               <label v-else-if="!field.hideLabel" class="field-label" :for="`sheet-value-${field.id}`">{{ field.label }}</label>
-              <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
+              <output v-if="techniqueCosts.has(field.id)" :id="`sheet-value-${field.id}`" class="plain-control" :aria-label="field.label" :data-reference="field.reference">{{ techniqueCosts.get(field.id) }}</output>
+              <input v-else-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
                 :aria-label="field.label" :value="field.value" :disabled="disabled" :readonly="field.readOnly" :inputmode="field.type==='number'?'decimal':'text'"
                 :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLInputElement).value})">
               <textarea v-else-if="field.type==='textarea'" :id="`sheet-value-${field.id}`" class="plain-control"
@@ -296,8 +311,8 @@ defineExpose({finishEditing})
                 <span>{{ field.value }} / {{ field.maximum }}</span>
               </div>
               <select v-else-if="field.type==='select'" :id="`sheet-value-${field.id}`" class="plain-control"
-                :aria-label="field.label" :value="field.value" :disabled="disabled || field.readOnly" @change="updateField(field.id,{value:($event.target as HTMLSelectElement).value})">
-                <option value="">Selecione</option>
+                :aria-label="field.label" :data-reference="field.reference" :value="field.value" :disabled="disabled || field.readOnly" @change="updateField(field.id,{value:($event.target as HTMLSelectElement).value})">
+                <option value="">{{ techniquesByAttribute.has(field.id) ? 'Selecione o atributo' : 'Selecione' }}</option>
                 <option v-for="(option,index) in field.options" :key="index" :value="option">{{ option }}</option>
               </select>
               <div v-else-if="field.type==='radio'" class="radio-options" role="radiogroup" :aria-label="field.label">
@@ -308,6 +323,10 @@ defineExpose({finishEditing})
               </div>
               <input v-else :id="`sheet-value-${field.id}`" type="checkbox" :aria-label="field.label" :checked="field.value==='true'"
                 :disabled="disabled || field.readOnly" @change="updateField(field.id,{value:String(($event.target as HTMLInputElement).checked)})">
+            </div>
+            <div v-if="!editing && techniquesByAttribute.has(field.id)" class="technique-actions">
+              <button type="button" :disabled="disabled || techniqueBusy" :aria-label="`Rolar ataque · ${field.label}`" @click="triggerTechnique(field.id,'attack')">Rolar ataque</button>
+              <button type="button" :disabled="disabled || techniqueBusy || !damageReady.has(field.id)" :aria-label="`Rolar dano · ${field.label}`" @click="triggerTechnique(field.id,'damage')">Rolar dano</button>
             </div>
             <button v-if="!editing && clickMacros.has(field.id)" type="button" class="macro-trigger"
               :class="{ 'macro-trigger-left':field.x>=28 && field.x+field.width+28>page.width }"
@@ -435,6 +454,11 @@ defineExpose({finishEditing})
 .bar-control input[type=range]::-moz-range-thumb { width:10px; height:10px; border:2px solid #f1e6fc; border-radius:50%; background:#68408c; }
 .radio-options { overflow:auto; scrollbar-width:thin; }
 .radio-options label { display:flex; align-items:center; }
+.technique-actions {
+  position:absolute; top:0; left:calc(100% + 8px); display:flex; gap:6px; height:100%; white-space:nowrap;
+}
+.technique-actions button { padding:0 8px; font-size:12px; background:#4e3166; color:#fff; }
+.technique-actions button:disabled { opacity:.65; }
 .sheet-field .macro-trigger {
   position:absolute; top:50%; left:calc(100% + 4px); z-index:2; transform:translateY(-50%);
   width:24px; height:24px; display:grid; place-items:center; padding:0; font-size:11px; line-height:1;

@@ -129,3 +129,7 @@ Configurações da ficha oferece edição sincronizada em blocos e texto para as
 ## Atualização — biblioteca de modelos de ficha
 
 A aba Ficha permite salvar modelos privados ou globais e copiar os modelos disponíveis para um personagem. A biblioteca inclui Shounen’s Dream, com três páginas e autoria da conta técnica Sistema. Consulte `36-modelos-de-ficha.md` para regras, permissões e validação.
+
+## Atualização — técnicas de Shounen’s Dream
+
+O modelo oficial tem seletores de elemento, nível e atributo, custo calculado e rolagens de ataque e dano com a descrição publicada no chat. Consulte `37-tecnicas-shounens-dream.md` para regras e uso.

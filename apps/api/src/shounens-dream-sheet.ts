@@ -36,6 +36,7 @@ function buildSheet(): PagedSheet {
     ['fogo', 'Fogo'], ['raio', 'Raio/Trovão'], ['gelo', 'Gelo'], ['terra', 'Pedra/Terra'],
     ['tempo', 'Tempo'], ['criacao', 'Criação'], ['espaco', 'Espaço'], ['destruicao', 'Destruição'],
   ]
+  const levels = Array.from({ length: 20 }, (_, index) => String(index + 1))
   const identity = [
     field('nome', 'Nome', 'text', 65.2, 158.74, 226.77, 17.01),
     field('jogador', 'Jogador', 'text', 306.14, 158.74, 223.94, 17.01),
@@ -49,8 +50,8 @@ function buildSheet(): PagedSheet {
     field('tipo_energia', 'Tipo de energia', 'radio', 477.07, 303.68, 50, 30.25, ['Ki', 'Mana']),
     ...attributeFields,
     ...elements.map(([ref, label], index) =>
-      field(`elemento_${ref}`, `Nível de ${label}`, 'number',
-        65.2 + (index % 4) * 119.055, 609.45 + Math.floor(index / 4) * 53.858, 96.38, 17.01)),
+      field(`elemento_${ref}`, `Nível de ${label}`, 'select',
+        65.2 + (index % 4) * 119.055, 609.45 + Math.floor(index / 4) * 53.858, 96.38, 17.01, levels)),
   ]
 
   const techniques = Array.from({ length: 8 }, (_, index) => {
@@ -59,13 +60,13 @@ function buildSheet(): PagedSheet {
     const y = 189.92 + index * 76.5354
     return [
       field(`${row}_nome`, `Nome da técnica ${number}`, 'text', 65.2, y, 184.25, 17.01),
-      field(`${row}_nivel`, `Nível da técnica ${number}`, 'number', 257.95, y, 42.52, 17.01),
-      field(`${row}_elemento`, `Elemento da técnica ${number}`, 'text', 308.98, y, 79.37, 17.01),
-      field(`${row}_custo`, `Custo da técnica ${number}`, 'text', 396.85, y, 53.86, 17.01),
+      field(`${row}_nivel`, `Nível da técnica ${number}`, 'select', 257.95, y, 42.52, 17.01, levels),
+      field(`${row}_elemento`, `Elemento da técnica ${number}`, 'select', 308.98, y, 79.37, 17.01, elements.map(([, label]) => label)),
+      { ...field(`${row}_custo`, `Custo da técnica ${number}`, 'number', 396.85, y, 53.86, 17.01), readOnly: true },
       field(`${row}_alcance`, `Alcance da técnica ${number}`, 'text', 459.21, y, 70.87, 17.01),
       field(`${row}_efeito`, `Efeito da técnica ${number}`, 'textarea', 150.24, y + 19.8425, 379.84, 19.84),
     ]
-  }).flat()
+  })
 
   const traits = Array.from({ length: 8 }, (_, index) => {
     const number = index + 1
@@ -79,9 +80,21 @@ function buildSheet(): PagedSheet {
     ]
   }).flat()
 
+  const techniqueAttributes = techniques.map((_, index) =>
+    field(`tecnica_${index + 1}_atributo`, `Atributo da técnica ${index + 1}`, 'select',
+      65.2, 231 + index * 76.5354, 125, 17.01, attributeFields.map(({ label }) => label)),
+  )
+
   return {
     version: 2,
-    pages: [identity, techniques, traits].map((fields, index) => ({
+    techniques: {
+      attributes: Object.fromEntries(attributeFields.map(({ id, label }) => [label, id])),
+      rows: techniques.map(([name, level, element, cost, range, effect], index) => ({
+        name: name.id, level: level.id, element: element.id, cost: cost.id,
+        range: range.id, effect: effect.id, attribute: techniqueAttributes[index].id,
+      })),
+    },
+    pages: [identity, [...techniques.flat(), ...techniqueAttributes], traits].map((fields, index) => ({
       id: stableId(index + 1), width, height: px(841.8898), fields,
     })),
     macros: attributeFields.map(({ id }) => ({
@@ -92,8 +105,6 @@ function buildSheet(): PagedSheet {
 }
 
 export async function seedShounensDreamSheet(client: PoolClient) {
-  const { rowCount } = await client.query('SELECT 1 FROM modelos_ficha WHERE id=$1', [shounensDreamModelId])
-  if (rowCount) return
   const sheet = characterSheet(JSON.stringify(buildSheet())) as PagedSheet
   const backgroundPages = sheet.pages.map((page, index) => ({ ...page, backgroundFile: shounensDreamBackgrounds[index] }))
 
@@ -104,7 +115,7 @@ export async function seedShounensDreamSheet(client: PoolClient) {
     [systemId, 'Sistema', systemEmail, randomHash],
   )
   await client.query(
-    "INSERT INTO modelos_ficha(id, owner_id, name, global, sheet) VALUES ($1, $2, $3, 'S', $4)",
+    "INSERT INTO modelos_ficha(id, owner_id, name, global, sheet) VALUES ($1, $2, $3, 'S', $4) ON CONFLICT (id) DO UPDATE SET sheet=EXCLUDED.sheet WHERE modelos_ficha.owner_id=EXCLUDED.owner_id AND NOT (modelos_ficha.sheet ? 'techniques')",
     [shounensDreamModelId, systemId, "Shounen’s Dream", { ...sheet, pages: backgroundPages }],
   )
 }
