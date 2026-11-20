@@ -7,11 +7,13 @@ import { Storage, MAX_IMAGE_BYTES } from './storage'
 import { sceneSize, sceneError } from './scene-dimensions'
 import { layer, bounds, normalizeRotation } from './layers'
 import { imageSize } from 'image-size'
+import { MAX_SHEET_BYTES, sheetPageParts } from './character-sheet'
 import { Characters, type CharacterFiles } from './characters'
 import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express'
 import { Mailer } from './mailer'
 import { position, rollDice, integer } from './tabletop-rules'
 
+const characterImageParts = ['appearance','token','sheet',...sheetPageParts].map(name=>({name,maxCount:1}))
 const derive = promisify(scrypt)
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -370,13 +372,13 @@ class ApiController {
     return this.characters.showCard(await this.tableAccess(id,req),characterId)
   }
   @Post('campaigns/:id/tabletop/characters')
-  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1},{name:'sheet',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:3,fields:10,fieldSize:200000}}))
+  @UseInterceptors(FileFieldsInterceptor(characterImageParts,{limits:{fileSize:MAX_IMAGE_BYTES,files:characterImageParts.length,fields:10,fieldSize:MAX_SHEET_BYTES}}))
   async createCharacter(@Param('id') id:string,@Body() body:Record<string,unknown>,@UploadedFiles() files:CharacterFiles|undefined,@Req() req:Request){
     this.accounts.mutation(req)
     return this.characters.save(await this.tableAccess(id,req),undefined,body,files)
   }
   @Post('campaigns/:id/tabletop/characters/:characterId/settings')
-  @UseInterceptors(FileFieldsInterceptor([{name:'appearance',maxCount:1},{name:'token',maxCount:1},{name:'sheet',maxCount:1}],{limits:{fileSize:MAX_IMAGE_BYTES,files:3,fields:10,fieldSize:200000}}))
+  @UseInterceptors(FileFieldsInterceptor(characterImageParts,{limits:{fileSize:MAX_IMAGE_BYTES,files:characterImageParts.length,fields:10,fieldSize:MAX_SHEET_BYTES}}))
   async updateCharacter(@Param('id') id:string,@Param('characterId') characterId:string,@Body() body:Record<string,unknown>,@UploadedFiles() files:CharacterFiles|undefined,@Req() req:Request){
     this.accounts.mutation(req)
     return this.characters.save(await this.tableAccess(id,req),characterId,body,files)

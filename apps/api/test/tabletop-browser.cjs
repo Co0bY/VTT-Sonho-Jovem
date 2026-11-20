@@ -79,6 +79,7 @@ async function main() {
   await page.getByLabel('Imagem de fundo da ficha',{exact:true}).setInputFiles({name:'ficha.png',mimeType:'image/png',buffer:sampleImage(80,110)})
   await page.getByRole('img',{name:'Fundo da ficha',exact:true}).waitFor()
   await page.getByRole('button',{name:'+ Adicionar campo',exact:true}).click()
+  await page.locator('.sheet-board').click({position:{x:24,y:24}})
   await page.getByLabel('Rótulo do campo',{exact:true}).fill('Força')
   await page.getByLabel('Referência do campo',{exact:true}).fill('for')
   await page.getByLabel('Tipo do campo',{exact:true}).selectOption('number')
@@ -104,7 +105,7 @@ async function main() {
   assert.equal((await snapshot()).tokens.length,0)
   const guardian=(await snapshot()).characters[0]
   assert.notEqual(guardian.appearance_url,guardian.token_url)
-  assert.equal(guardian.sheet.fields[0].reference,'for');assert.equal(guardian.sheet.fields[0].label,'Força');assert.equal(guardian.sheet.fields[0].value,'15');assert.ok(guardian.sheet.fields[0].x>24);assert.ok(guardian.sheet.fields[0].y>24);assert.ok(guardian.sheet_background_url)
+  assert.equal(guardian.sheet.pages[0].fields[0].reference,'for');assert.equal(guardian.sheet.pages[0].fields[0].label,'Força');assert.equal(guardian.sheet.pages[0].fields[0].value,'15');assert.ok(guardian.sheet.pages[0].fields[0].x>24);assert.ok(guardian.sheet.pages[0].fields[0].y>24);assert.ok(guardian.sheet_background_url)
   assert.equal(guardian.description_format,'html');assert.match(guardian.description,/<(b|strong)>/)
   await page.getByRole('button',{name:'Ver cartão de apresentação de Guardião',exact:true}).click()
   const previewCard=page.getByRole('dialog',{name:'Guardião',exact:true})

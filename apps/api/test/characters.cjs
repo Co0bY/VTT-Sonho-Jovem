@@ -62,6 +62,36 @@ async function main(){
  const noSheetBackground=await request(`${base}/characters/${empty.id}/settings`,201,removeSheet,1)
  assert.equal(noSheetBackground.sheet_background_url,null);assert.deepEqual(noSheetBackground.sheet,layout)
  await asset(withSheet.sheet_background_url,404,1)
+ const legacyAgain=await request(`${base}/characters/${empty.id}/settings`,201,sheetForm,1)
+ const firstPage='00000000-0000-4000-8000-000000000001'
+ const defaults={height:64,highlight:false,hideLabel:false,maximum:100,options:[]}
+ const pages=[
+  {id:firstPage,width:800,height:1100,fields:[{...defaults,...layout.fields[0]}]},
+  {id:randomUUID(),width:800,height:600,fields:[{...defaults,id:randomUUID(),label:'Vida',reference:'vida',type:'bar',maximum:40,x:0,y:0,width:200,value:'23'}]},
+ ]
+ const sheetV2={version:2,pages}
+ const migration=form('Duas páginas',player)
+ migration.append('sheet',JSON.stringify(sheetV2))
+ migration.append('sheet_page_1',new Blob([image(80,60)],{type:'image/png'}),'recursos.png')
+ const migrated=await request(`${base}/characters/${empty.id}/settings`,201,migration,1)
+ assert.equal(migrated.sheet.pages[0].backgroundUrl,legacyAgain.sheet_background_url)
+ assert.deepEqual(migrated.sheet.pages[0].fields,pages[0].fields)
+ const secondBackground=migrated.sheet.pages[1].backgroundUrl
+ await asset(legacyAgain.sheet_background_url,200,1,image(80,110))
+ await asset(secondBackground,200,1,image(80,60))
+ await asset(secondBackground,200,0,image(80,60))
+ await asset(secondBackground,403,2)
+ for(const invalid of [{value:'41'},{reference:'for'},{height:601},{width:11},{type:'checkbox',value:'1'},{type:'radio',options:['A'],value:'B'}]){
+  const update=form('Ficha inválida',player)
+  update.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],fields:[{...pages[1].fields[0],...invalid}]}]}))
+  await request(`${base}/characters/${empty.id}/settings`,400,update,1)
+ }
+ const removePageImage=form('Remover fundo da segunda',player)
+ removePageImage.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],removeBackground:true,backgroundFile:legacyAgain.sheet_background_url.split('/').pop()}]}))
+ const remaining=await request(`${base}/characters/${empty.id}/settings`,201,removePageImage,1)
+ assert.equal(remaining.sheet.pages[1].backgroundUrl,null)
+ await asset(secondBackground,404,1)
+ await asset(legacyAgain.sheet_background_url,200,1,image(80,110))
  const second=await request(`${base}/scenes`,201,{name:'Outro cenário'})
  await request(`${base}/scenes/${second.id}/activate`,201,{})
  let state=await request(base,200)
