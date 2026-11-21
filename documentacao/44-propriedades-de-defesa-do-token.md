@@ -33,3 +33,5 @@ Na versão ampliada, passaram build, tipagem, 30 testes unitários, integração
 Em **Propriedades**, escolha **+ Adicionar barra**. Cada lado tem seu próprio seletor. **Valor manual** abre um campo numérico. Selecionar um campo da ficha usa o valor salvo nele, inclusive quando está em outra página. Assim, por exemplo, o lado esquerdo pode ler **Vida atual** e o direito, **Vida máxima**. Ao salvar a ficha, a mesa atualiza a barra na sincronização seguinte. Se um campo vinculado ficar vazio, deixar de ser numérico ou for removido, a barra fica oculta até voltar a ter os dois valores válidos.
 
 O vínculo lê a ficha. O servidor entrega aos demais jogadores somente os valores exibidos na barra. Barras salvas sem vínculos continuam usando os valores manuais.
+
+A suíte da mesa no Chromium adicionou uma quarta barra, ligou seus dois lados a campos diferentes e verificou a atualização de 15/25 para 19/36 após salvar os novos valores da ficha. Também foram conferidos valores manuais, vínculos entre páginas e a ocultação quando um campo referenciado fica indisponível. Build, tipagem, os 30 testes unitários e a integração da API passaram.
