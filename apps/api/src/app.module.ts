@@ -233,7 +233,12 @@ class ApiController {
     const cursor = this.messageCursor(after)
     const [sceneList, tokens, chat, members, objects, folders, characters, characterFolders] = await Promise.all([
       this.db.pool.query('SELECT * FROM tabletop_scenes WHERE campaign_id=$1 AND ($2::boolean OR id=$3) ORDER BY created_at,id', [id, access.master, access.scene.id]),
-      this.db.pool.query("SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.width,t.height,t.rotation,t.layer,c.token_file FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND t.scene_id=$2 AND ($3::boolean OR t.layer<>'mestre') ORDER BY t.created_at,t.id", [id,access.scene.id,access.master]),
+      this.db.pool.query(`SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.width,t.height,t.rotation,t.layer,c.token_file,
+        CASE WHEN $3::boolean OR (t.owner_id=$4 AND t.layer='geral') THEN t.defense END AS defense,
+        CASE WHEN $3::boolean OR (t.owner_id=$4 AND t.layer='geral') THEN t.observation END AS observation
+        FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id
+        WHERE t.campaign_id=$1 AND t.scene_id=$2 AND ($3::boolean OR t.layer<>'mestre')
+        ORDER BY t.created_at,t.id`, [id,access.scene.id,access.master,access.user.id]),
       cursor === null ? this.chatPage(id) : this.db.pool.query(`
         SELECT m.id::text,m.content,m.roll,m.created_at,u.name AS author,u.id AS user_id
         FROM tabletop_messages m JOIN users u ON u.id=m.user_id
@@ -493,6 +498,21 @@ class ApiController {
     const coords = position(body.x, body.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type)
     const size=access.scene.grid_type==='none'?null:access.scene.cell_size
     return (await this.db.pool.query('INSERT INTO tabletop_tokens(id,campaign_id,owner_id,name,color,x,y,scene_id,layer,width,height) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) RETURNING *', [randomUUID(), id, owner, name, color, coords.x, coords.y, access.scene.id, targetLayer,size])).rows[0]
+  }
+  @Post('campaigns/:id/tabletop/tokens/:tokenId/properties') async tokenProperties(
+    @Param('id') id: string, @Param('tokenId') tokenId: string, @Body() body: Record<string, unknown>, @Req() req: Request,
+  ) {
+    this.accounts.mutation(req)
+    const access = await this.tableAccess(id, req)
+    if (!uuid.test(tokenId)) throw new BadRequestException('Token inválido.')
+    const defense = body?.defense === null ? null : integer(body?.defense, -2147483648, 2147483647, 'Defesa')
+    const observation = body?.observation === null ? null : integer(body?.observation, -2147483648, 2147483647, 'Observação')
+    const { rows } = await this.db.pool.query(`
+      UPDATE tabletop_tokens SET defense=$1, observation=$2
+      WHERE id=$3 AND campaign_id=$4 AND scene_id=$5 AND ($6::boolean OR (owner_id=$7 AND layer='geral'))
+      RETURNING defense, observation`, [defense, observation, tokenId, id, access.scene.id, access.master, access.user.id])
+    if (!rows.length) throw new ForbiddenException('Você não pode editar as propriedades deste token.')
+    return rows[0]
   }
   @Post('campaigns/:id/tabletop/tokens/:tokenId/rotate') async rotateToken(@Param('id') id:string,@Param('tokenId') tokenId:string,@Body() body:Record<string,unknown>,@Req() req:Request){
     this.accounts.mutation(req);const access=await this.tableAccess(id,req)

@@ -4,7 +4,7 @@ import { Application, Container, Graphics, Text, Texture, Sprite } from 'pixi.js
 import type { Scene, Token, Tool, Layer, SceneObject, Rect } from '../tabletop/types'
 import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, measureRuler, type Camera, type Point } from '../tabletop/geometry'
 const props = defineProps<{ scene: Scene; tokens: Token[]; objects: SceneObject[]; layer: Layer; userId: string; master: boolean; tool: Tool; selected: string; locked: boolean }>()
-const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point]; resize:[id:string,rect:Rect]; rotate:[id:string,rotation:number,free:boolean] }>()
+const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; properties: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point]; resize:[id:string,rect:Rect]; rotate:[id:string,rotation:number,free:boolean] }>()
 const host = ref<HTMLDivElement>(), failure = ref(''), backgroundError = ref(''), backgroundLoading = ref(false)
 let backgroundTexture: Texture | undefined, backgroundAbort: AbortController | undefined, backgroundVersion = 0
 let app: Application | undefined, world: Container, observer: ResizeObserver | undefined, disposed = false
@@ -13,7 +13,7 @@ let tokenAbort:AbortController|undefined,tokenVersion=0
 const objectTextures = new Map<string,Texture>()
 let objectAbort: AbortController | undefined, objectVersion=0
 let camera: Camera = { x: 0, y: 0, scale: 0.6 }
-let drag: { pointer: number; mode: 'token' | 'pan' | 'measure' | 'object' | 'background'; start: Point; camera: Camera; token?: Token; object?: SceneObject; rect?:Rect; offset?: Point; position?: Point; size?:{width:number;height:number}; moved?:boolean } | undefined
+let drag: { pointer: number; mode: 'token' | 'pan' | 'measure' | 'object' | 'background'; start: Point; camera: Camera; token?: Token; contextToken?: Token; object?: SceneObject; rect?:Rect; offset?: Point; position?: Point; size?:{width:number;height:number}; moved?:boolean } | undefined
 let manipulation: {pointer:number;id:string;rect:Rect;preview:Rect;handle:number;free:boolean;at:Point;startAngle:number} | undefined
 let ruler: { start: Point; end: Point; value: number } | undefined
 const canMove = (t: Token) => props.master || (t.layer === 'geral' && t.owner_id === props.userId)
@@ -199,6 +199,12 @@ function down(event: PointerEvent) {
   if (![0, 1, 2].includes(event.button)) return
   event.preventDefault(); host.value.focus(); host.value.setPointerCapture(event.pointerId)
   const screen = point(event), at = toWorld(screen, camera)
+  if (event.button === 2) {
+    const hit = hitToken(at)
+    const contextToken = hit && !props.locked && canMove(hit) ? hit : undefined
+    drag = { pointer: event.pointerId, mode: 'pan', start: screen, camera: { ...camera }, contextToken }
+    return
+  }
   const selected=selectedImage()
   if(selected&&props.tool==='select'&&!props.locked&&event.button===0){
     const handle=handleAt(selected,at)
@@ -236,7 +242,14 @@ function move(event: PointerEvent) {
   }
   if (!drag || drag.pointer !== event.pointerId) return
   const at = point(event)
-  if (drag.mode === 'pan') { camera.x = drag.camera.x + at.x - drag.start.x; camera.y = drag.camera.y + at.y - drag.start.y }
+  if (drag.mode === 'pan') {
+    const dx = at.x - drag.start.x, dy = at.y - drag.start.y
+    if (drag.contextToken && Math.hypot(dx, dy) >= 4) drag.moved = true
+    if (!drag.contextToken || drag.moved) {
+      camera.x = drag.camera.x + dx
+      camera.y = drag.camera.y + dy
+    }
+  }
   if (drag.mode === 'measure') { drag.position = toWorld(at, camera); updateRuler(drag.start, drag.position, event.altKey) }
   if(drag.mode==='object'||drag.mode==='background'){const atWorld=toWorld(at,camera);drag.position={x:Math.max(0,Math.min(props.scene.width-drag.rect!.width,atWorld.x-drag.offset!.x)),y:Math.max(0,Math.min(props.scene.height-drag.rect!.height,atWorld.y-drag.offset!.y))}}
   if (drag.mode === 'token') {
@@ -260,6 +273,13 @@ function up(event: PointerEvent) {
   if(drag.mode==='measure')ruler=undefined
   const finished = drag; drag = undefined
   if (host.value?.hasPointerCapture(event.pointerId)) host.value.releasePointerCapture(event.pointerId)
+  if (event.type !== 'pointercancel' && finished.contextToken && !finished.moved && !props.locked) {
+    const token = props.tokens.find(token => token.id === finished.contextToken?.id)
+    if (token && canMove(token)) {
+      emit('select', token.id)
+      emit('properties', token.id)
+    }
+  }
   if (event.type !== 'pointercancel' && finished.mode === 'token' && finished.position && (finished.position.x!==finished.token!.x || finished.position.y!==finished.token!.y || (finished.moved&&finished.size&&(finished.size.width!==finished.token!.width||finished.size.height!==finished.token!.height)))) emit('move', finished.token!.id, finished.position)
   if(event.type!=='pointercancel'&&(finished.mode==='object'||finished.mode==='background')&&finished.rect&&finished.position&&(Math.abs(finished.rect.x-finished.position.x)>0.5||Math.abs(finished.rect.y-finished.position.y)>0.5))emit('transform',finished.object?.id||'background',{...finished.rect,...finished.position})
   paint()
@@ -286,6 +306,13 @@ function keyboard(event: KeyboardEvent) {
   }
   if (event.key === 'Escape') { manipulation=undefined;drag=undefined;ruler = undefined; emit('select', ''); paint(); return }
   const token = props.tokens.find(t => t.id === props.selected)
+  if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+    if (token && token.layer === props.layer && !props.locked && canMove(token)) {
+      event.preventDefault()
+      emit('properties', token.id)
+    }
+    return
+  }
   const directions: Record<string, Point> = { ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 }, ArrowUp: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 } }
   const direction = directions[event.key]
   if (!token || token.layer!==props.layer || !direction || !canMove(token) || props.locked) return

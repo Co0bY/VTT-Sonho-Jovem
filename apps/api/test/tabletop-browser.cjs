@@ -140,6 +140,35 @@ async function main() {
   const labelShot=await page.screenshot({clip:{x:Math.round(testOrigin.x+1632*testScale)-55,y:Math.round(testOrigin.y+(1120+32)*testScale)+8,width:110,height:25},animations:'disabled'})
   const usesIdentificationColor=await screenshotHasColor(page,labelShot,[164,122,226],16)
   assert.equal(usesIdentificationColor,true,'The token label must use the character identification color')
+  const tokenAt = (await snapshot()).tokens[0]
+  const tokenPoint = { x: testOrigin.x + tokenAt.x * testScale, y: testOrigin.y + tokenAt.y * testScale }
+  await page.mouse.move(tokenPoint.x, tokenPoint.y)
+  await page.mouse.down({button:'right'})
+  await page.mouse.move(tokenPoint.x + 24, tokenPoint.y + 10, {steps:4})
+  await page.mouse.move(tokenPoint.x, tokenPoint.y, {steps:4})
+  await page.mouse.up({button:'right'})
+  const tokenDialog = page.getByRole('heading',{name:'Propriedades do token',exact:true})
+  assert.equal(await tokenDialog.count(),0)
+  await page.mouse.click(tokenPoint.x, tokenPoint.y, {button:'right'})
+  await tokenDialog.waitFor()
+  const defense = page.getByLabel('Defesa',{exact:true})
+  const observation = page.getByLabel('Observação',{exact:true})
+  assert.equal(await defense.inputValue(),'')
+  assert.equal(await observation.inputValue(),'')
+  await defense.fill('16')
+  await observation.fill('13')
+  await page.locator('.token-properties').getByRole('button',{name:'Salvar',exact:true}).click()
+  await tokenDialog.waitFor({state:'hidden'})
+  assert.deepEqual((await snapshot()).tokens.map(({defense,observation})=>[defense,observation]),[[16,13]])
+  await page.mouse.click(tokenPoint.x, tokenPoint.y, {button:'right'})
+  await tokenDialog.waitFor()
+  assert.equal(await defense.inputValue(),'16')
+  assert.equal(await observation.inputValue(),'13')
+  await defense.fill('99')
+  await page.locator('.token-properties').getByRole('button',{name:'Cancelar',exact:true}).click()
+  await tokenDialog.waitFor({state:'hidden'})
+  assert.equal((await snapshot()).tokens[0].defense,16)
+
   async function resizeMapToken(width,height,free=false){
     await page.waitForFunction(()=>!document.querySelector('.table-status')?.textContent.includes('Salvando'))
     const token=(await snapshot()).tokens[0],w=token.width??51.2,h=token.height??51.2,anchor={x:token.x-w/2,y:token.y-h/2}
@@ -562,7 +591,7 @@ async function main() {
   assert.ok(await chat.evaluate(el=>Math.abs(el.scrollHeight-el.clientHeight-el.scrollTop)<2))
 
   assert.deepEqual(errors,[])
-  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, tokens pequenos ampliados ao grid na colocação e no arraste, giro de 15 graus/Alt livre, alças de tokens com tamanho proporcional/Alt, rotação persistida e marcador colorido com inicial, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, dados 3D e áudio, paginação de chat com posição preservada, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
+  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, propriedades do token por clique direito, tokens pequenos ampliados ao grid na colocação e no arraste, giro de 15 graus/Alt livre, alças de tokens com tamanho proporcional/Alt, rotação persistida e marcador colorido com inicial, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, dados 3D e áudio, paginação de chat com posição preservada, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
   if(browser)await browser.close()
