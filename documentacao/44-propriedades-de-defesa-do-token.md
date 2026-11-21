@@ -25,3 +25,5 @@ O menu do navegador podia receber o evento após o painel já ter aberto. O mapa
 O PostgreSQL guarda as opções por presença. O servidor valida as novas propriedades e mantém a compatibilidade com clientes que enviam só Defesa e Observação. A consulta da mesa fornece as propriedades visuais necessárias para renderizar o mapa.
 
 Para verificar, abra as propriedades por clique direito, configure uma barra e uma aura, marque uma condição e ajuste a luz. Salve e reabra o painel. Em outra sessão, use um token próprio com visão habilitada para conferir a área descoberta e a parte coberta pela névoa.
+
+Na versão ampliada, passaram build, tipagem, 30 testes unitários, integração da API e a suíte da mesa no Chromium. A suíte conferiu o cancelamento do evento redirecionado para o diálogo, salvou as opções das cinco abas e verificou a névoa em uma segunda sessão.
