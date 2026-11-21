@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { Application, Container, Graphics, Text, Texture, Sprite } from 'pixi.js'
+import { barColors, tokenConditions } from '../tabletop/token-settings'
+import { distancePixels, drawTokenFog, tokenVisibility, tokenPointVisible, type Sector } from '../tabletop/token-vision'
 import type { Scene, Token, Tool, Layer, SceneObject, Rect } from '../tabletop/types'
 import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, measureRuler, type Camera, type Point } from '../tabletop/geometry'
 const props = defineProps<{ scene: Scene; tokens: Token[]; objects: SceneObject[]; layer: Layer; userId: string; master: boolean; tool: Tool; selected: string; locked: boolean }>()
 const emit = defineEmits<{ move: [id: string, point: Point]; select: [id: string]; properties: [id: string]; zoom: [percent: number]; transform: [id:string,rect:Rect]; edit: [id:string,rect:Rect]; remove: [id:string]; place:[id:string,point:Point]; resize:[id:string,rect:Rect]; rotate:[id:string,rotation:number,free:boolean] }>()
-const host = ref<HTMLDivElement>(), failure = ref(''), backgroundError = ref(''), backgroundLoading = ref(false)
+const host = ref<HTMLDivElement>(), fog = ref<HTMLCanvasElement>(), failure = ref(''), backgroundError = ref(''), backgroundLoading = ref(false)
 let backgroundTexture: Texture | undefined, backgroundAbort: AbortController | undefined, backgroundVersion = 0
+const fogBuffers: HTMLCanvasElement[] = []
 let app: Application | undefined, world: Container, observer: ResizeObserver | undefined, disposed = false
 const tokenTextures=new Map<string,Texture>(),tokenImageError=ref('')
 let tokenAbort:AbortController|undefined,tokenVersion=0
@@ -15,8 +18,76 @@ let objectAbort: AbortController | undefined, objectVersion=0
 let camera: Camera = { x: 0, y: 0, scale: 0.6 }
 let drag: { pointer: number; mode: 'token' | 'pan' | 'measure' | 'object' | 'background'; start: Point; camera: Camera; token?: Token; contextToken?: Token; object?: SceneObject; rect?:Rect; offset?: Point; position?: Point; size?:{width:number;height:number}; moved?:boolean } | undefined
 let manipulation: {pointer:number;id:string;rect:Rect;preview:Rect;handle:number;free:boolean;at:Point;startAngle:number} | undefined
+let rightClick: { x: number; y: number; time: number } | undefined
+function preventBrowserMenu(event: MouseEvent) {
+  // On some browsers the event is sent after pointerup, to the newly opened dialog.
+  const atBoard = !!host.value && event.composedPath().includes(host.value)
+  const sameGesture = rightClick && performance.now() - rightClick.time < 700 &&
+    Math.hypot(event.clientX - rightClick.x, event.clientY - rightClick.y) <= 8
+  if (atBoard || sameGesture) {
+    event.preventDefault()
+    if (!atBoard) rightClick = undefined
+  }
+}
+function resetRightClick() { rightClick = undefined }
 let ruler: { start: Point; end: Point; value: number } | undefined
 const canMove = (t: Token) => props.master || (t.layer === 'geral' && t.owner_id === props.userId)
+function displayTokens() {
+  return props.tokens.map(token => {
+    if (drag?.mode === 'token' && drag.token?.id === token.id && drag.position) return { ...token, ...drag.position }
+    if (manipulation?.id === `token:${token.id}`) return { ...token, rotation: manipulation.preview.rotation ?? token.rotation }
+    return token
+  })
+}
+
+function drawSector(graphics: Graphics, area: Sector, color: number, alpha: number) {
+  if (!area.radius || !area.angle) return
+  if (area.angle === 360) graphics.circle(area.x, area.y, area.radius)
+  else {
+    const half = area.angle * Math.PI / 360
+    graphics.moveTo(area.x, area.y).arc(area.x, area.y, area.radius, area.direction - half, area.direction + half).closePath()
+  }
+  graphics.fill({ color, alpha })
+}
+
+function drawTokenMarkers(item: Container, token: Token, top: number, width: number) {
+  const settings = token.settings
+  if (!settings?.bars?.some(bar => bar.value !== null && bar.max !== null) && !settings?.conditions?.length) return
+  const markers = new Container()
+  markers.scale.set(1 / camera.scale)
+  markers.y = -top - 5 / camera.scale
+  let offset = 0
+  for (const [index, bar] of (settings?.bars ?? []).entries()) {
+    if (bar.value === null || bar.max === null) continue
+    const length = Math.max(42, Math.min(90, width * camera.scale))
+    const fraction = Math.max(0, Math.min(1, bar.value / bar.max))
+    offset -= 12
+    const background = new Graphics().roundRect(-length / 2, offset, length, 10, 3).fill(0x23192d)
+    if (fraction) background.roundRect(-length / 2, offset, length * fraction, 10, 3).fill(barColors[index]!)
+    const text = new Text({ text: `${bar.value}/${bar.max}`, style: {
+      fontFamily: 'Arial', fontSize: 8, fill: 0xffffff, stroke: { color: 0x17131e, width: 2 },
+    } })
+    text.anchor.set(.5)
+    text.y = offset + 5
+    markers.addChild(background, text)
+  }
+  const conditions = tokenConditions.filter(condition => settings?.conditions?.includes(condition.value))
+  for (const [index, condition] of conditions.entries()) {
+    const x = (index - (conditions.length - 1) / 2) * 14
+    const y = offset - 8
+    const badge = new Graphics().circle(x, y, 6).fill(condition.color).stroke({ color: 0x22182b, width: 1 })
+    markers.addChild(badge)
+    if (!condition.value.startsWith('marcador-')) {
+      const label = new Text({ text: condition.label.slice(0, 1), style: { fontFamily: 'Arial', fontSize: 8, fontWeight: 'bold', fill: 0x21182b } })
+      label.anchor.set(.5)
+      label.position.set(x, y)
+      markers.addChild(label)
+    }
+  }
+  if (markers.children.length) item.addChild(markers)
+  else markers.destroy()
+}
+
 function clear(container=world) {
   const children=container.removeChildren()
   // Release mask relationships before destroying graphics referenced as masks.
@@ -28,6 +99,8 @@ function paint() {
   clear()
   world.position.set(camera.x, camera.y); world.scale.set(camera.scale)
   const { width, height, cell_size: cell } = props.scene
+  const displayed = displayTokens()
+  const visibility = tokenVisibility(displayed, props.scene, props.userId, props.master)
   const base = new Graphics().roundRect(0, 0, width, height, 8).fill(0x25272d).stroke({ color: 0x55505f, width: 2 })
   // Neutral scene keeps maps/geometry independent of the application UI.
   world.addChild(base)
@@ -57,19 +130,46 @@ function paint() {
     const texture=token.token_url?tokenTextures.get(token.token_url):undefined
     const rect=manipulation?.id===`token:${token.id}`?manipulation.preview:tokenBounds({...token,...point,...(drag?.mode==='token'&&drag.token?.id===token.id?drag.size:{})},cell,texture)
     const item = new Container(); item.position.set(rect.x+rect.width/2,rect.y+rect.height/2)
-    const visual=new Container();visual.angle=rect.rotation??0;item.addChild(visual)
+    const visual = new Container(), body = new Container()
+    visual.angle = rect.rotation ?? 0
+    body.alpha = (token.settings?.image?.opacity ?? 100) / 100
+    visual.addChild(body)
+    item.addChild(visual)
     if(texture){
-      const image=new Sprite(texture);image.anchor.set(0.5);image.width=rect.width;image.height=rect.height;visual.addChild(image)
+      const image=new Sprite(texture);image.anchor.set(0.5);image.width=rect.width;image.height=rect.height;if(token.settings?.image?.mirrored)image.scale.x*=-1;body.addChild(image)
     }else{
-      visual.addChild(new Graphics().ellipse(0,0,rect.width/2,rect.height/2).fill(token.token_url?0x302538:token.color).stroke({color:0xe7d7ff,width:1/camera.scale}))
+      body.addChild(new Graphics().ellipse(0,0,rect.width/2,rect.height/2).fill(token.token_url?0x302538:token.color).stroke({color:0xe7d7ff,width:1/camera.scale}))
       const initials = new Text({ text: token.name.trim().slice(0,1).toUpperCase(), style: { fontFamily: 'Arial', fontSize: Math.min(rect.width,rect.height)*0.35, fill: '#ffffff', fontWeight: 'bold' } })
-      initials.anchor.set(0.5); visual.addChild(initials)
+      initials.anchor.set(0.5); body.addChild(initials)
     }
     if(props.selected===token.id)visual.addChild(new Graphics().rect(-rect.width/2,-rect.height/2,rect.width,rect.height).stroke({color:0xe0caff,width:2/camera.scale}))
     const label = new Text({ text: token.name, style: { fontFamily: 'Arial', fontSize: 13, fill: token.color, stroke: { color: '#17131e', width: 4 } } })
-    label.anchor.set(0.5, 0); label.scale.set(1 / camera.scale); label.y = (Math.abs(Math.sin((rect.rotation??0)*Math.PI/180))*rect.width+Math.abs(Math.cos((rect.rotation??0)*Math.PI/180))*rect.height)/2 + 8 / camera.scale; item.addChild(label); item.alpha=layer==='mestre' && props.layer!=='mestre'?0.5:1;world.addChild(item)
+    const angle = (rect.rotation ?? 0) * Math.PI / 180
+    const top = (Math.abs(Math.sin(angle)) * rect.width + Math.abs(Math.cos(angle)) * rect.height) / 2
+    label.anchor.set(.5, 0)
+    label.scale.set(1 / camera.scale)
+    label.y = top + 8 / camera.scale
+    item.addChild(label)
+    drawTokenMarkers(item, token, top, rect.width)
+    item.alpha = layer === 'mestre' && props.layer !== 'mestre' ? .5 : 1
+    world.addChild(item)
   }
   }
+  const effects = new Graphics()
+  for (const area of visibility.dimLights) drawSector(effects, area, 0xffdf89, .10)
+  for (const area of visibility.brightLights) drawSector(effects, area, 0xffdf89, .24)
+  for (const token of displayed) {
+    for (const aura of token.settings?.auras ?? []) {
+      if (!aura.radius || !aura.opacity) continue
+      const radius = distancePixels(props.scene, aura.radius)
+      if (aura.shape === 'square') effects.rect(token.x - radius, token.y - radius, radius * 2, radius * 2)
+      else effects.circle(token.x, token.y, radius)
+      effects.fill({ color: aura.color, alpha: aura.opacity / 100 })
+    }
+  }
+  const effectsMask = new Graphics().rect(0, 0, width, height).fill(0xffffff)
+  world.addChild(effectsMask, effects)
+  effects.mask = effectsMask
   drawObjects('fundo');drawTokens('fundo')
   if (props.scene.grid_type!=='none') {
     const grid = new Graphics()
@@ -91,6 +191,7 @@ function paint() {
     text.scale.set(1 / camera.scale);text.position.set(ruler.end.x + 12 / camera.scale, ruler.end.y - 25 / camera.scale); world.addChild(text)
   }
   app.render()
+  if (fog.value) drawTokenFog(fog.value, props.scene, camera, visibility, fogBuffers, app.screen.width, app.screen.height)
 }
 function backgroundBounds():Rect|undefined{
   if(props.scene.background_transform)return props.scene.background_transform
@@ -143,7 +244,11 @@ function drawHandles(){
   points.forEach((p,i)=>{if(i===4)g.circle(p.x,p.y,size+1/camera.scale);else g.rect(p.x-size,p.y-size,size*2,size*2);g.fill(0xffffff).stroke({color:0x8052ae,width:1/camera.scale})})
   world.addChild(g)
 }
-function hitToken(at:Point){return [...props.tokens].reverse().find(token=>token.layer===props.layer&&contains(at,tokenBounds(token,props.scene.cell_size,token.token_url?tokenTextures.get(token.token_url):undefined)))}
+function hitToken(at: Point) {
+  if (!tokenPointVisible(at, tokenVisibility(displayTokens(), props.scene, props.userId, props.master))) return
+  return [...props.tokens].reverse().find(token => token.layer === props.layer &&
+    contains(at, tokenBounds(token, props.scene.cell_size, token.token_url ? tokenTextures.get(token.token_url) : undefined)))
+}
 function handleAt(selected:NonNullable<ReturnType<typeof selectedImage>>,at:Point){
   const radius=selected.kind==='token'?Math.min(10,Math.max(3,Math.min(selected.rect.width,selected.rect.height)*camera.scale/3)):11
   return handles(selected.rect).findIndex(p=>Math.hypot(p.x-at.x,p.y-at.y)<=radius/camera.scale)
@@ -200,6 +305,7 @@ function down(event: PointerEvent) {
   event.preventDefault(); host.value.focus(); host.value.setPointerCapture(event.pointerId)
   const screen = point(event), at = toWorld(screen, camera)
   if (event.button === 2) {
+    rightClick = { x: event.clientX, y: event.clientY, time: performance.now() }
     const hit = hitToken(at)
     const contextToken = hit && !props.locked && canMove(hit) ? hit : undefined
     drag = { pointer: event.pointerId, mode: 'pan', start: screen, camera: { ...camera }, contextToken }
@@ -276,6 +382,7 @@ function up(event: PointerEvent) {
   if (event.type !== 'pointercancel' && finished.contextToken && !finished.moved && !props.locked) {
     const token = props.tokens.find(token => token.id === finished.contextToken?.id)
     if (token && canMove(token)) {
+      if (rightClick) rightClick = { x: event.clientX, y: event.clientY, time: performance.now() }
       emit('select', token.id)
       emit('properties', token.id)
     }
@@ -335,6 +442,9 @@ watch(() => [props.tokens, props.objects, props.scene, props.selected,props.laye
 watch([()=>props.scene.width,()=>props.scene.height],()=>{manipulation=undefined;drag=undefined;center()})
 watch(() => [props.tool,props.layer], () => { manipulation=undefined;drag = undefined; paint() })
 onMounted(async () => {
+  document.addEventListener('contextmenu', preventBrowserMenu, true)
+  document.addEventListener('pointerdown', resetRightClick, true)
+  for (let index = 0; index < 3; index++) fogBuffers.push(document.createElement('canvas'))
   const instance = new Application()
   try {
     await instance.init({ width: host.value?.clientWidth || 800, height: host.value?.clientHeight || 600, background: '#15141c', antialias: true, autoDensity: true, resolution: Math.min(devicePixelRatio, 2), autoStart: false })
@@ -351,8 +461,8 @@ onMounted(async () => {
     host.value!.addEventListener('wheel', wheel, { passive: false }); center(); void loadBackground();void loadObjects();void loadTokenImages()
   } catch { failure.value = 'Não foi possível iniciar o cenário. Verifique se a aceleração gráfica do navegador está habilitada e recarregue a página.' }
 })
-onBeforeUnmount(() => { disposed = true;tokenVersion++;tokenAbort?.abort(); backgroundVersion++; backgroundAbort?.abort();objectVersion++;objectAbort?.abort(); observer?.disconnect(); host.value?.removeEventListener('wheel', wheel); if (app) app.destroy(true, { children: true }); backgroundTexture?.destroy(true);for(const texture of objectTextures.values())texture.destroy(true);for(const texture of tokenTextures.values())texture.destroy(true) })
+onBeforeUnmount(() => { document.removeEventListener('contextmenu', preventBrowserMenu, true); document.removeEventListener('pointerdown', resetRightClick, true); disposed = true;tokenVersion++;tokenAbort?.abort(); backgroundVersion++; backgroundAbort?.abort();objectVersion++;objectAbort?.abort(); observer?.disconnect(); host.value?.removeEventListener('wheel', wheel); if (app) app.destroy(true, { children: true }); backgroundTexture?.destroy(true);for(const texture of objectTextures.values())texture.destroy(true);for(const texture of tokenTextures.values())texture.destroy(true) })
 defineExpose({ zoomBy, center, placementPoint, focus:()=>host.value?.focus() })
 </script>
-<template><div ref="host" class="pixi-board" :class="`tool-${tool}`" tabindex="0" role="application" aria-label="Cenário da mesa. Arraste para navegar, use a roda para zoom. Selecione um token e use as setas para movê-lo ou Delete para excluir. Imagens: cantos mantêm proporção no grid; Alt permite tamanho livre." @dragover="dragOver" @drop="dropCharacter" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up" @contextmenu.prevent @dblclick="doubleClick" @keydown="keyboard" @keyup="keyboard"><p v-if="failure" role="alert" class="board-failure">{{ failure }}</p><p v-if="backgroundLoading" class="background-status" role="status">Carregando imagem…</p><p v-if="tokenImageError" class="background-status" role="alert">{{ tokenImageError }}</p><p v-if="backgroundError" class="background-status" role="alert">{{ backgroundError }}</p></div></template>
-<style scoped>.pixi-board{width:100%;height:100%;overflow:hidden;touch-action:none;outline:none;position:relative}.pixi-board:focus-visible{box-shadow:inset 0 0 0 2px #b48ce9}.pixi-board :deep(canvas){display:block}.tool-pan{cursor:grab}.tool-measure{cursor:crosshair}.board-failure{padding:40px;color:#ffd1d8;max-width:500px}.background-status{position:absolute;bottom:65px;left:20px;background:#2d203c;color:#e0caef;font-size:11px;padding:10px;border-radius:6px;z-index:2}</style>
+<template><div ref="host" class="pixi-board" :class="`tool-${tool}`" tabindex="0" role="application" aria-label="Cenário da mesa. Arraste para navegar, use a roda para zoom. Selecione um token e use as setas para movê-lo ou Delete para excluir. Imagens: cantos mantêm proporção no grid; Alt permite tamanho livre." @dragover="dragOver" @drop="dropCharacter" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up" @contextmenu.prevent @dblclick="doubleClick" @keydown="keyboard" @keyup="keyboard"><p v-if="failure" role="alert" class="board-failure">{{ failure }}</p><p v-if="backgroundLoading" class="background-status" role="status">Carregando imagem…</p><p v-if="tokenImageError" class="background-status" role="alert">{{ tokenImageError }}</p><p v-if="backgroundError" class="background-status" role="alert">{{ backgroundError }}</p></div><canvas ref="fog" class="board-fog" hidden aria-hidden="true"></canvas></template>
+<style scoped>.pixi-board{width:100%;height:100%;overflow:hidden;touch-action:none;outline:none;position:relative}.pixi-board:focus-visible{box-shadow:inset 0 0 0 2px #b48ce9}.pixi-board :deep(canvas){display:block}.board-fog{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.board-fog[hidden]{display:none}.tool-pan{cursor:grab}.tool-measure{cursor:crosshair}.board-failure{padding:40px;color:#ffd1d8;max-width:500px}.background-status{position:absolute;bottom:65px;left:20px;background:#2d203c;color:#e0caef;font-size:11px;padding:10px;border-radius:6px;z-index:2}</style>

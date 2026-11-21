@@ -190,6 +190,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
       await client.query(`
         ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS width integer NOT NULL DEFAULT 3200 CHECK(width BETWEEN 128 AND 16384);
         ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS height integer NOT NULL DEFAULT 2200 CHECK(height BETWEEN 128 AND 16384);
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'::jsonb;
         ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS defense integer;
         ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS observation integer;
         ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS rotation double precision NOT NULL DEFAULT 0 CHECK(rotation>=0 AND rotation<360);

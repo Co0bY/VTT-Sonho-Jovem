@@ -1,3 +1,4 @@
+import { tokenSettings } from './token-settings'
 import { Query, Body, Controller, Get, Post, Param, Req, Res, Injectable, Module, UnauthorizedException, BadRequestException, ForbiddenException, ConflictException, NotFoundException, HttpException, UseInterceptors, UploadedFile, UploadedFiles, StreamableFile } from '@nestjs/common'
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
@@ -233,7 +234,7 @@ class ApiController {
     const cursor = this.messageCursor(after)
     const [sceneList, tokens, chat, members, objects, folders, characters, characterFolders] = await Promise.all([
       this.db.pool.query('SELECT * FROM tabletop_scenes WHERE campaign_id=$1 AND ($2::boolean OR id=$3) ORDER BY created_at,id', [id, access.master, access.scene.id]),
-      this.db.pool.query(`SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.width,t.height,t.rotation,t.layer,c.token_file,
+      this.db.pool.query(`SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.width,t.height,t.rotation,t.layer,c.token_file,t.settings,
         CASE WHEN $3::boolean OR (t.owner_id=$4 AND t.layer='geral') THEN t.defense END AS defense,
         CASE WHEN $3::boolean OR (t.owner_id=$4 AND t.layer='geral') THEN t.observation END AS observation
         FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id
@@ -507,10 +508,11 @@ class ApiController {
     if (!uuid.test(tokenId)) throw new BadRequestException('Token inválido.')
     const defense = body?.defense === null ? null : integer(body?.defense, -2147483648, 2147483647, 'Defesa')
     const observation = body?.observation === null ? null : integer(body?.observation, -2147483648, 2147483647, 'Observação')
+    const settings = body?.settings === undefined ? null : tokenSettings(body.settings)
     const { rows } = await this.db.pool.query(`
-      UPDATE tabletop_tokens SET defense=$1, observation=$2
+      UPDATE tabletop_tokens SET defense=$1, observation=$2, settings=COALESCE($8,settings)
       WHERE id=$3 AND campaign_id=$4 AND scene_id=$5 AND ($6::boolean OR (owner_id=$7 AND layer='geral'))
-      RETURNING defense, observation`, [defense, observation, tokenId, id, access.scene.id, access.master, access.user.id])
+      RETURNING defense, observation`, [defense, observation, tokenId, id, access.scene.id, access.master, access.user.id, settings])
     if (!rows.length) throw new ForbiddenException('Você não pode editar as propriedades deste token.')
     return rows[0]
   }

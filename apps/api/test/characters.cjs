@@ -342,6 +342,7 @@ async function main(){
  assert.deepEqual(await request(privateProperties,201,{defense:15,observation:12}),{defense:15,observation:12})
  await request(privateProperties,403,{defense:99,observation:0},1)
  await request(privateProperties,400,{defense:15.5,observation:12})
+ await request(privateProperties,400,{defense:15,observation:12,settings:{conditions:['inventada']}})
  const playerToken=(await request(base,200,undefined,1)).tokens.find(token=>token.id===privatePresence.id)
  assert.equal(playerToken.defense,null)
  assert.equal(playerToken.observation,null)

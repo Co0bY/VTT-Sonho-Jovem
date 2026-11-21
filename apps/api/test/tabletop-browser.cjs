@@ -151,15 +151,43 @@ async function main() {
   assert.equal(await tokenDialog.count(),0)
   await page.mouse.click(tokenPoint.x, tokenPoint.y, {button:'right'})
   await tokenDialog.waitFor()
+  assert.equal(await page.locator('.token-properties').evaluate((dialog, point) => {
+    const event = new MouseEvent('contextmenu', { bubbles:true, cancelable:true, button:2, clientX:point.x, clientY:point.y })
+    dialog.dispatchEvent(event)
+    return event.defaultPrevented
+  }, tokenPoint),true,'Retargeting the contextmenu to the open dialog must suppress the native menu')
   const defense = page.getByLabel('Defesa',{exact:true})
   const observation = page.getByLabel('Observação',{exact:true})
   assert.equal(await defense.inputValue(),'')
   assert.equal(await observation.inputValue(),'')
   await defense.fill('16')
   await observation.fill('13')
+  await page.getByLabel('Valor atual da barra 1',{exact:true}).fill('30')
+  await page.getByLabel('Máximo da barra 1',{exact:true}).fill('40')
+  await page.getByRole('tab',{name:'Auras',exact:true}).click()
+  await page.getByLabel('Raio da aura 1',{exact:true}).fill('3')
+  await chooseOption(page.getByLabel('Forma da aura 1',{exact:true}), 'square')
+  await page.getByRole('tab',{name:'Condições',exact:true}).click()
+  await chooseOption(page.getByLabel('Condições do token',{exact:true}), 'caido')
+  await page.getByLabel('Condições do token',{exact:true}).press('Escape')
+  await page.getByRole('tab',{name:'Imagem',exact:true}).click()
+  await page.getByLabel('Espelhar horizontalmente',{exact:true}).check()
+  await page.getByRole('tab',{name:'Visão e luz',exact:true}).click()
+  await page.getByLabel('Possui visão',{exact:true}).check()
+  await page.getByLabel(/Na escuridão/).fill('3')
+  await page.getByLabel(/Alcance da luz intensa/).fill('1.5')
+
   await page.locator('.token-properties').getByRole('button',{name:'Salvar',exact:true}).click()
   await tokenDialog.waitFor({state:'hidden'})
   assert.deepEqual((await snapshot()).tokens.map(({defense,observation})=>[defense,observation]),[[16,13]])
+  const configuredToken = (await snapshot()).tokens[0]
+  assert.deepEqual(configuredToken.settings.bars[0],{value:30,max:40})
+  assert.equal(configuredToken.settings.auras[0].shape,'square')
+  assert.deepEqual(configuredToken.settings.conditions,['caido'])
+  assert.equal(configuredToken.settings.image.mirrored,true)
+  assert.equal(configuredToken.settings.vision.dark,3)
+  assert.equal(configuredToken.settings.light.bright,1.5)
+
   await page.mouse.click(tokenPoint.x, tokenPoint.y, {button:'right'})
   await tokenDialog.waitFor()
   assert.equal(await defense.inputValue(),'16')
@@ -253,6 +281,26 @@ async function main() {
   // A second session must receive the persisted messages and be able to move its own token.
   const playerContext=await contextFor(playerToken), playerPage=await playerContext.newPage()
   await playerPage.goto(`http://127.0.0.1:9014/mesas/${campaignId}`)
+  await playerPage.locator('.board-fog').waitFor({state:'visible'})
+  assert.ok(await playerPage.locator('.board-fog').evaluate(canvas => {
+    const pixels = canvas.getContext('2d').getImageData(Math.round(canvas.width/4), Math.round(canvas.height/2),1,1)
+    return pixels.data[3] === 255
+  }),'A região fora da visão deve aparecer coberta para o controlador')
+  assert.equal(await page.locator('.board-fog').isVisible(),false)
+  const clearEffects = {
+    ...configuredToken.settings,
+    vision:{...configuredToken.settings.vision,enabled:false},
+    auras:configuredToken.settings.auras.map(aura=>({...aura,radius:0})),
+    bars:configuredToken.settings.bars.map(()=>({value:null,max:null})),
+    conditions:[], image:{opacity:100,mirrored:false}, light:{bright:0,dim:0,angle:360},
+  }
+  const clearedEffects = await fetch(`http://127.0.0.1:3104/campaigns/${campaignId}/tabletop/tokens/${configuredToken.id}/properties`,{
+    method:'POST',headers:{Cookie:`vtt_session=${ownerToken}`,'Content-Type':'application/json'},
+    body:JSON.stringify({defense:16,observation:13,settings:clearEffects}),
+  })
+  assert.equal(clearedEffects.status,201,await clearedEffects.text())
+  await playerPage.locator('.board-fog').waitFor({state:'hidden'})
+
   await playerPage.locator('.pixi-board canvas').waitFor()
   await playerPage.getByText('O grupo chegou ao cenário.',{exact:true}).waitFor()
   assert.equal(await playerPage.locator('[data-dice-animation]').count(),0)
@@ -591,7 +639,7 @@ async function main() {
   assert.ok(await chat.evaluate(el=>Math.abs(el.scrollHeight-el.clientHeight-el.scrollTop)<2))
 
   assert.deepEqual(errors,[])
-  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, propriedades do token por clique direito, tokens pequenos ampliados ao grid na colocação e no arraste, giro de 15 graus/Alt livre, alças de tokens com tamanho proporcional/Alt, rotação persistida e marcador colorido com inicial, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, dados 3D e áudio, paginação de chat com posição preservada, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
+  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, propriedades, barras, auras, condições, imagem e névoa do token, tokens pequenos ampliados ao grid na colocação e no arraste, giro de 15 graus/Alt livre, alças de tokens com tamanho proporcional/Alt, rotação persistida e marcador colorido com inicial, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, dados 3D e áudio, paginação de chat com posição preservada, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
   if(browser)await browser.close()

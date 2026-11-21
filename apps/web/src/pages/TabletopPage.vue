@@ -299,7 +299,7 @@ onBeforeUnmount(() => {
       </div><footer class="table-status"><span><i></i>{{ busy ? 'Salvando…' : error || networkError ? 'Falha de atualização' : 'Alterações salvas no servidor' }}</span><span>Protótipo · atualização a cada 2 s <b>✦ SONHO JOVEM</b></span></footer>
     <CharacterCardDialog :card="presentationCard" :master="master" :busy="busy" :error="presentationError" @close="closeCard" @present="presentCard" />
     <CharacterDialog ref="characterEditor" :master="master" :read-only="sharedCharacter" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
-    <TokenPropertiesDialog :token="tokenProperties" :busy="busy" :error="error"
+    <TokenPropertiesDialog :token="tokenProperties" :unit="state.scene.distance_unit" :busy="busy" :error="error"
       :save="saveTokenProperties" @close="tokenPropertiesId = ''" />
     <ImageTransformDialog :scene="state.scene" :target="transformTarget" :busy="busy" :error="error" :save="transformImage" :remove="removeObject" @close="transformTarget = null" /></template>
   </div>
