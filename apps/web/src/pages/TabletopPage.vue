@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TabletopBoard from '../components/TabletopBoard.vue'
 import ScenesMenu from '../components/ScenesMenu.vue'
-import { reductions, type MacroMessage } from '../tabletop/sheet-macros'
+import { macroMessage, reductions, type MacroAction, type MacroMessage } from '../tabletop/sheet-macros'
 import CharacterDialog from '../components/CharacterDialog.vue'
 import CharacterCardDialog from '../components/CharacterCardDialog.vue'
 import { editorHtml } from '../tabletop/rich-text'
@@ -27,6 +27,18 @@ const editingLayer=ref<Layer>('geral'),objectName=ref(''),objectFile=ref<File>()
 const transformTarget=ref<{id:string;name:string;rect:Rect;layer:Layer}|null>(null)
 const master = computed(() => state.value?.role === 'mestre')
 const selectedToken = computed(() => state.value?.tokens.find(t => t.id === selected.value))
+const tokenRolls = computed(() => {
+  const token = selectedToken.value
+  if (!token || (!master.value && token.owner_id !== state.value?.user.id)) return []
+  const sheet = state.value?.characters.find(character => character.id === token.character_id)?.sheet
+  if (sheet?.version !== 2) return []
+  const fields = sheet.pages.flatMap(page => page.fields)
+  return (sheet.macros ?? []).flatMap(rule => {
+    if (rule.event !== 'clique' || rule.action.kind !== 'rolar') return []
+    const field = fields.find(field => field.id === rule.fieldId)
+    return field ? [{ id: field.id, label: field.label || field.reference, value: field.value, action: rule.action }] : []
+  })
+})
 const loginLink = `/?retorno=${encodeURIComponent(`/mesas/${id}`)}`
 const tabs = [{ id: 'chat', label: 'Chat', icon: '☷' }, { id: 'characters', label: 'Personagens', icon: '◉' }, { id: 'members', label: 'Grupo', icon: '♙' }, { id: 'settings', label: 'Cenários', icon: '▦' },{ id:'layers',label:'Camadas',icon:'▱' }]
 let timer: ReturnType<typeof setTimeout> | undefined, disposed = false, revision = 0
@@ -97,6 +109,9 @@ async function removeToken(tokenId: string) { await action(async () => { await a
 async function removeObject(objectId:string){return action(async()=>{await api(`${endpoint}/objects/${objectId}/remove`,{});selected.value=''})}
 function removeSelected(targetId:string){if(targetId.startsWith('object:'))void removeObject(targetId.slice(7));else void removeToken(targetId)}
 async function sendMacro(message:MacroMessage){return api(`${endpoint}/messages`,message)}
+async function rollFromToken(roll: { action: Extract<MacroAction, { kind: 'rolar' }>; value: string }) {
+  await action(async () => { await sendMacro(macroMessage(roll.action, roll.value)) })
+}
 async function send(content = draft.value) { if (!content.trim()) return; await action(async () => { await api(`${endpoint}/messages`, { content }); if (content === draft.value) draft.value = ''; await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) }) }
 async function createScene(settings: object) {
   let created: Scene | undefined
@@ -131,7 +146,12 @@ onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(
         <nav class="table-tools" aria-label="Ferramentas da mesa"><div class="tool-group"><button :class="{ active: tool === 'select' }" :aria-pressed="tool === 'select'" title="Selecionar e mover tokens" aria-label="Selecionar e mover tokens" @click="tool = 'select'">↖</button><button :class="{ active: tool === 'pan' }" :aria-pressed="tool === 'pan'" title="Mover câmera" aria-label="Mover câmera" @click="tool = 'pan'">✥</button><button :class="{ active: tool === 'measure' }" :aria-pressed="tool === 'measure'" title="Medir distância" aria-label="Medir distância" @click="tool = 'measure'">↔</button></div><div class="tool-group"><button v-if="master" title="Novo personagem" aria-label="Novo personagem" @click="panel = 'characters'; sidebar = true; openCharacter()">+</button><button title="Configurar cenário" aria-label="Configurar cenário" @click="panel = 'settings'; sidebar = true">▦</button><button title="Centralizar cenário" aria-label="Centralizar cenário" @click="board?.center()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 12h10m-5-5v10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div><span class="tools-bottom">SJ</span></nav>
         <section class="table-scene" aria-label="Área de jogo"><div v-if="master" class="layer-picker"><label for="active-layer">Camada de edição</label><select id="active-layer" v-model="editingLayer"><option value="fundo">Fundo</option><option value="mestre">Mestre · só você vê</option><option value="geral">Geral</option></select></div><div class="scene-caption"><span class="scene-dot"></span> {{ state.scene.name }} <span class="scene-dimensions">{{ Math.ceil(state.scene.width / state.scene.cell_size) }} × {{ Math.ceil(state.scene.height / state.scene.cell_size) }} células · {{ state.scene.snap && state.scene.grid_type !== 'none' ? 'Encaixe ativo' : 'Movimento livre' }}</span></div>
           <TabletopBoard :key="state.scene.id" ref="board" :scene="state.scene" :tokens="state.tokens" :objects="state.objects" :layer="master ? editingLayer : 'geral'" :user-id="state.user.id" :master="master" :tool="tool" :selected="selected" :locked="busy" @move="moveToken" @resize="resizeToken" @rotate="rotateToken" @select="selected = $event" @zoom="zoom = $event" @transform="transformImage" @edit="editImage" @remove="removeSelected" @place="placeCharacter" />
-          <div v-if="selectedToken" class="selection-info"><span :style="{ background: selectedToken.color }"></span><strong>{{ selectedToken.name }}</strong><small>{{ master || selectedToken.owner_id === state.user.id ? (master ? 'Cantos: tamanho · Alça circular: girar · Alt: livre · Del: remover' : 'Arraste ou use as setas') : 'Controlado por outro participante' }}</small><button @click="selected = ''" aria-label="Desmarcar token">×</button></div>
+          <div v-if="selectedToken" class="selection-info">
+            <span aria-hidden="true" :style="{ background: selectedToken.color }"></span>
+            <strong>{{ selectedToken.name }}</strong>
+            <button v-for="roll in tokenRolls" :key="roll.id" type="button"
+              :aria-label="`Rolar ${roll.label}`" :disabled="busy" @click="rollFromToken(roll)">{{ roll.label }}</button>
+          </div>
           <div class="scene-controls"><span>{{ tool === 'measure' ? `Arraste entre centros · Alt: livre · 1 célula = ${state.scene.distance_per_cell} ${state.scene.distance_unit}` : tool === 'pan' ? 'Arraste o cenário para navegar' : master && (selected === 'background' || selected.startsWith('object:')) ? 'Cantos: proporção/grid · Alt: livre · Duplo clique: editar · Del: excluir' : 'Selecione um token · Arraste o fundo para navegar' }}</span><div><button aria-label="Diminuir zoom" @click="board?.zoomBy(0.8)">−</button><output aria-label="Zoom atual">{{ zoom }}%</output><button aria-label="Aumentar zoom" @click="board?.zoomBy(1.25)">+</button><button aria-label="Ajustar cenário à tela" title="Ajustar cenário à tela" @click="board?.center()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 12h10m-5-5v10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div></div>
         </section>
         <aside v-if="sidebar" class="table-panel"><nav class="panel-tabs" aria-label="Painéis da mesa"><button v-for="tab in tabs.filter(tab=>master || tab.id!=='layers')" :key="tab.id" :class="{ active: panel === tab.id }" :aria-pressed="panel === tab.id" :aria-label="tab.label" @click="panel = tab.id"><span>{{ tab.icon }}</span>{{ tab.label }}</button></nav>
