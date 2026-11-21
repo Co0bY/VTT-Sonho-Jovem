@@ -140,6 +140,11 @@ async function main() {
   const labelShot=await page.screenshot({clip:{x:Math.round(testOrigin.x+1632*testScale)-55,y:Math.round(testOrigin.y+(1120+32)*testScale)+8,width:110,height:25},animations:'disabled'})
   const usesIdentificationColor=await screenshotHasColor(page,labelShot,[164,122,226],16)
   assert.equal(usesIdentificationColor,true,'The token label must use the character identification color')
+  const guardianSheet = (await db.query('SELECT sheet FROM tabletop_characters WHERE id=$1',[guardian.id])).rows[0].sheet
+  const currentField = guardianSheet.pages[0].fields[0]
+  const maxField = {...currentField,id:randomUUID(),label:'Capacidade',reference:'capacidade',value:'25'}
+  guardianSheet.pages[0].fields.push(maxField)
+  await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[guardianSheet,guardian.id])
   const tokenAt = (await snapshot()).tokens[0]
   const tokenPoint = { x: testOrigin.x + tokenAt.x * testScale, y: testOrigin.y + tokenAt.y * testScale }
   await page.mouse.move(tokenPoint.x, tokenPoint.y)
@@ -164,6 +169,10 @@ async function main() {
   await observation.fill('13')
   await page.getByLabel('Valor atual da barra 1',{exact:true}).fill('30')
   await page.getByLabel('Máximo da barra 1',{exact:true}).fill('40')
+  await page.getByRole('button',{name:'+ Adicionar barra',exact:true}).click()
+  await chooseOption(page.getByLabel('Vínculo de valor atual da barra 4',{exact:true}), currentField.id)
+  await chooseOption(page.getByLabel('Vínculo de máximo da barra 4',{exact:true}), maxField.id)
+
   await page.getByRole('tab',{name:'Auras',exact:true}).click()
   await page.getByLabel('Raio da aura 1',{exact:true}).fill('3')
   await chooseOption(page.getByLabel('Forma da aura 1',{exact:true}), 'square')
@@ -182,6 +191,15 @@ async function main() {
   assert.deepEqual((await snapshot()).tokens.map(({defense,observation})=>[defense,observation]),[[16,13]])
   const configuredToken = (await snapshot()).tokens[0]
   assert.deepEqual(configuredToken.settings.bars[0],{value:30,max:40})
+  assert.deepEqual(configuredToken.settings.bars[3],{value:null,max:null,valueFieldId:currentField.id,maxFieldId:maxField.id})
+  assert.deepEqual(configuredToken.display_bars[3],{value:15,max:25})
+  currentField.value='19'
+  maxField.value='36'
+  await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[guardianSheet,guardian.id])
+  assert.deepEqual((await snapshot()).tokens[0].display_bars[3],{value:19,max:36})
+  currentField.value='15'
+  await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[guardianSheet,guardian.id])
+
   assert.equal(configuredToken.settings.auras[0].shape,'square')
   assert.deepEqual(configuredToken.settings.conditions,['caido'])
   assert.equal(configuredToken.settings.image.mirrored,true)
@@ -639,7 +657,7 @@ async function main() {
   assert.ok(await chat.evaluate(el=>Math.abs(el.scrollHeight-el.clientHeight-el.scrollTop)<2))
 
   assert.deepEqual(errors,[])
-  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, propriedades, barras, auras, condições, imagem e névoa do token, tokens pequenos ampliados ao grid na colocação e no arraste, giro de 15 graus/Alt livre, alças de tokens com tamanho proporcional/Alt, rotação persistida e marcador colorido com inicial, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, dados 3D e áudio, paginação de chat com posição preservada, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
+  console.log('PASS navegador: dashboard → mesa, renderização PixiJS, propriedades, barras vinculadas, auras, condições, imagem e névoa do token, tokens pequenos ampliados ao grid na colocação e no arraste, giro de 15 graus/Alt livre, alças de tokens com tamanho proporcional/Alt, rotação persistida e marcador colorido com inicial, PNG transparente e nome com cor verificados por pixels, personagens de campanha com Aparência/Token separados, criação sem presença automática, arraste para cenário vazio e remoção sem perder cadastro, edição e pop-up mobile, movimento por teclado e arraste real, chat/dados compartilhados, dados 3D e áudio, paginação de chat com posição preservada, duas sessões, pastas com criação/renomeação, recolhimento, movimentação e persistência após reload, exclusão de pasta mantendo o cenário, troca direta Quadrado/Hexagonal com comparação de pixels, com e sem imagem e após reload em Hexagonal, tipos Quadrado/Hexagonal/Nenhum, bloqueio e reativação dos controles de aparência sem perda de valores, cor e opacidade do grid persistidas, campo/barra de opacidade sincronizados, configuração, persistência após reload e layout mobile sem overflow, criação/escala de cenários, upload e renderização de imagem, ativação compartilhada, pop-ups, duplo clique no fundo e nos objetos, alças proporcionais ao grid em objetos e fundo, Alt para tamanho livre, exclusão pelo modal e Delete em objeto/token sem interferir em campos de edição, rotação, ângulo persistido após reload e confirmado no pop-up, camada Mestre privada, dimensões por quadrados/pixels e ajuste conjunto do cenário ao tamanho da imagem.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
   if(browser)await browser.close()

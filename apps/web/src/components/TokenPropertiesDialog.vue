@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import FilterSelect from './FilterSelect.vue'
-import { barColors, editableTokenSettings, tokenConditions } from '../tabletop/token-settings'
+import { editableTokenSettings, maxTokenBars, newTokenBar, tokenBarColor, tokenConditions } from '../tabletop/token-settings'
 import type { Token, TokenProperties } from '../tabletop/types'
 
 const props = defineProps<{
   token?: Token
+  fields: { id: string; label: string; reference: string; value: string }[]
   unit: string
   busy: boolean
   error: string
@@ -16,6 +17,22 @@ const defense = ref<number | ''>('')
 const observation = ref<number | ''>('')
 const settings = ref(editableTokenSettings())
 const tab = ref('properties')
+const fieldOptions = computed(() => [
+  { value: '', label: 'Valor manual' },
+  ...props.fields.map(field => ({ value: field.id, label: `${field.label} (${field.reference})` })),
+])
+const barSides = [
+  { value: 'value', field: 'valueFieldId', label: 'Valor atual' },
+  { value: 'max', field: 'maxFieldId', label: 'Máximo' },
+] as const
+function optionsForLink(id: string | undefined) {
+  return id && !props.fields.some(field => field.id === id)
+    ? [...fieldOptions.value, { value: id, label: 'Campo indisponível', disabled: true }]
+    : fieldOptions.value
+}
+function addBar() {
+  if (settings.value.bars.length < maxTokenBars) settings.value.bars.push(newTokenBar())
+}
 const auraShapes = [{ value: 'circle', label: 'Círculo' }, { value: 'square', label: 'Quadrado' }]
 const sightRanges = [{ key: 'bright', label: 'Sob luz intensa' }, { key: 'dim', label: 'Sob luz fraca' },
   { key: 'dark', label: 'Na escuridão' }] as const
@@ -37,6 +54,7 @@ async function save() {
     settings: {
       ...settings.value,
       bars: settings.value.bars.map(bar => ({
+        ...bar,
         value: typeof bar.value === 'number' ? bar.value : null,
         max: typeof bar.max === 'number' ? bar.max : null,
       })),
@@ -77,13 +95,24 @@ async function save() {
               </label>
             </div>
             <fieldset v-for="(bar,index) in settings.bars" :key="index" class="token-fieldset" :disabled="busy">
-              <legend><span class="color-dot" :style="{ background: barColors[index] }"></span>Barra {{ index + 1 }}</legend>
+              <legend><span class="color-dot" :style="{ background: tokenBarColor(index) }"></span>Barra {{ index + 1 }}</legend>
               <div class="token-property-fields">
-                <label>Valor atual<input v-model.number="bar.value" type="number" step="1" :aria-label="`Valor atual da barra ${index+1}`"></label>
-                <label>Máximo<input v-model.number="bar.max" type="number" step="1" min="1" :aria-label="`Máximo da barra ${index+1}`"></label>
+                <div v-for="side in barSides" :key="side.value">
+                  <label>{{ side.label }}
+                    <FilterSelect :model-value="bar[side.field] ?? ''" :options="optionsForLink(bar[side.field])"
+                      :aria-label="`Vínculo de ${side.label.toLowerCase()} da barra ${index+1}`" :disabled="busy"
+                      @update:model-value="bar[side.field]=$event || undefined" />
+                  </label>
+                  <input v-if="!bar[side.field]" v-model.number="bar[side.value]" type="number" step="1"
+                    :min="side.value === 'max' ? 1 : -2147483648" max="2147483647"
+                    :aria-label="`${side.label} da barra ${index+1}`">
+                </div>
               </div>
+              <button type="button" class="text-button token-remove-bar" :aria-label="`Remover barra ${index+1}`"
+                @click="settings.bars.splice(index,1)">Remover barra</button>
             </fieldset>
-            <p>Deixe o valor ou o máximo em branco para ocultar a barra.</p>
+            <button type="button" class="table-button" :disabled="busy || settings.bars.length >= maxTokenBars" @click="addBar">+ Adicionar barra</button>
+            <p>A barra aparece quando o valor atual e o máximo estão preenchidos.</p>
           </section>
           <section v-else-if="tab === 'auras'" aria-label="Auras">
             <fieldset v-for="(aura,index) in settings.auras" :key="index" class="token-fieldset" :disabled="busy">
@@ -172,6 +201,7 @@ async function save() {
 .token-preview { height:100px;display:grid;place-items:center;background:#17111e;border-radius:8px;margin-bottom:12px; }
 .token-preview img { width:90px;height:90px;object-fit:contain; }
 .token-preview > span { width:58px;height:58px;border-radius:50%;display:grid;place-items:center;font-size:22px;font-weight:700; }
+.token-remove-bar { padding:6px 0; }
 .token-properties h2 { margin-top:0; }
 .token-name { display:flex;align-items:center;gap:8px;overflow-wrap:anywhere; }
 .token-name span { width:9px;height:9px;border-radius:50%;flex:none; }

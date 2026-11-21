@@ -18,8 +18,13 @@ export const tokenConditions = [
   { value: 'marcador-vermelho', label: 'Marcador vermelho', color: '#e97677' },
 ] as const
 export const barColors = ['#79d68d', '#7aafea', '#e97780']
+export type TokenBar = { value: number | null; max: number | null; valueFieldId?: string; maxFieldId?: string }
+export const maxTokenBars = 12
+export const newTokenBar = (): TokenBar => ({ value: null, max: null })
+export const tokenBarColor = (index: number) => barColors[index % barColors.length]!
+
 export type TokenSettings = {
-  bars: { value: number | null; max: number | null }[]
+  bars: TokenBar[]
   auras: { radius: number; shape: 'circle' | 'square'; color: string; opacity: number }[]
   conditions: string[]
   image: { opacity: number; mirrored: boolean }
@@ -29,7 +34,7 @@ export type TokenSettings = {
 
 export function editableTokenSettings(saved?: Partial<TokenSettings>): TokenSettings {
   return {
-    bars: Array.from({ length: 3 }, (_, index) => ({ value: null, max: null, ...saved?.bars?.[index] })),
+    bars: saved?.bars?.map(bar => ({ ...bar })) ?? Array.from({ length: 3 }, newTokenBar),
     auras: ['#e8c764', '#81d8ae'].map((color, index) => ({
       radius: 0, shape: 'circle', color, opacity: 35, ...saved?.auras?.[index],
     })),

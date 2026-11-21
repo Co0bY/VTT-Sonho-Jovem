@@ -16,7 +16,7 @@ Os 28 testes unitários e a suíte da mesa no Chromium passaram. A suíte abriu 
 
 ## Barras, auras, condições, imagem e visão
 
-O painel separa os ajustes em abas. **Propriedades** inclui três barras de valor e máximo. Cada barra preenchida aparece acima do token. Em **Auras**, configure até duas áreas com raio na unidade do cenário, forma circular ou quadrada, cor e opacidade. **Condições** oferece pesquisa, seleção múltipla, marcadores coloridos e a opção de limpar todos. **Imagem** mostra a prévia e permite ajustar a opacidade e o espelhamento da presença atual.
+O painel separa os ajustes em abas. **Propriedades** começa com três barras de valor e máximo. É possível adicionar ou remover barras, até o total de 12 por token. Cada barra preenchida aparece acima do token. Em **Auras**, configure até duas áreas com raio na unidade do cenário, forma circular ou quadrada, cor e opacidade. **Condições** oferece pesquisa, seleção múltipla, marcadores coloridos e a opção de limpar todos. **Imagem** mostra a prévia e permite ajustar a opacidade e o espelhamento da presença atual.
 
 Na aba **Visão e luz**, configure o alcance sob luz intensa, fraca e na escuridão. O token também pode emitir luz intensa e fraca. Os ângulos de visão e luz acompanham a rotação do token e as distâncias usam a escala do cenário. A névoa aparece para o jogador quando ele controla um token com **Possui visão** na camada Geral. Ela acompanha as áreas visíveis no momento. Paredes e memória de exploração ficam para uma etapa futura.
 
@@ -27,3 +27,9 @@ O PostgreSQL guarda as opções por presença. O servidor valida as novas propri
 Para verificar, abra as propriedades por clique direito, configure uma barra e uma aura, marque uma condição e ajuste a luz. Salve e reabra o painel. Em outra sessão, use um token próprio com visão habilitada para conferir a área descoberta e a parte coberta pela névoa.
 
 Na versão ampliada, passaram build, tipagem, 30 testes unitários, integração da API e a suíte da mesa no Chromium. A suíte conferiu o cancelamento do evento redirecionado para o diálogo, salvou as opções das cinco abas e verificou a névoa em uma segunda sessão.
+
+### Vínculos com a ficha
+
+Em **Propriedades**, escolha **+ Adicionar barra**. Cada lado tem seu próprio seletor. **Valor manual** abre um campo numérico. Selecionar um campo da ficha usa o valor salvo nele, inclusive quando está em outra página. Assim, por exemplo, o lado esquerdo pode ler **Vida atual** e o direito, **Vida máxima**. Ao salvar a ficha, a mesa atualiza a barra na sincronização seguinte. Se um campo vinculado ficar vazio, deixar de ser numérico ou for removido, a barra fica oculta até voltar a ter os dois valores válidos.
+
+O vínculo lê a ficha. O servidor entrega aos demais jogadores somente os valores exibidos na barra. Barras salvas sem vínculos continuam usando os valores manuais.

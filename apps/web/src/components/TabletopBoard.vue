@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { Application, Container, Graphics, Text, Texture, Sprite } from 'pixi.js'
-import { barColors, tokenConditions } from '../tabletop/token-settings'
+import { tokenBarColor, tokenConditions } from '../tabletop/token-settings'
 import { distancePixels, drawTokenFog, tokenVisibility, tokenPointVisible, type Sector } from '../tabletop/token-vision'
 import type { Scene, Token, Tool, Layer, SceneObject, Rect } from '../tabletop/types'
 import { minimumTokenSize, rotationAngle, tokenBounds, hexGridSegments, imagePoint, imageContains, resizeImage, toWorld, zoomAt, tokenPosition, measureRuler, type Camera, type Point } from '../tabletop/geometry'
@@ -52,18 +52,19 @@ function drawSector(graphics: Graphics, area: Sector, color: number, alpha: numb
 
 function drawTokenMarkers(item: Container, token: Token, top: number, width: number) {
   const settings = token.settings
-  if (!settings?.bars?.some(bar => bar.value !== null && bar.max !== null) && !settings?.conditions?.length) return
+  const bars = token.display_bars ?? settings?.bars ?? []
+  if (!bars.some(bar => bar.value !== null && bar.max !== null) && !settings?.conditions?.length) return
   const markers = new Container()
   markers.scale.set(1 / camera.scale)
   markers.y = -top - 5 / camera.scale
   let offset = 0
-  for (const [index, bar] of (settings?.bars ?? []).entries()) {
+  for (const [index, bar] of bars.entries()) {
     if (bar.value === null || bar.max === null) continue
     const length = Math.max(42, Math.min(90, width * camera.scale))
     const fraction = Math.max(0, Math.min(1, bar.value / bar.max))
     offset -= 12
     const background = new Graphics().roundRect(-length / 2, offset, length, 10, 3).fill(0x23192d)
-    if (fraction) background.roundRect(-length / 2, offset, length * fraction, 10, 3).fill(barColors[index]!)
+    if (fraction) background.roundRect(-length / 2, offset, length * fraction, 10, 3).fill(tokenBarColor(index))
     const text = new Text({ text: `${bar.value}/${bar.max}`, style: {
       fontFamily: 'Arial', fontSize: 8, fill: 0xffffff, stroke: { color: 0x17131e, width: 2 },
     } })

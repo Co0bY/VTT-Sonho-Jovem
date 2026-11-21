@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common'
+import type { StoredSheet } from './character-sheet'
 import { integer } from './tabletop-rules'
 
 const conditionIds = new Set(['agarrado', 'assustado', 'atordoado', 'caido', 'cego', 'envenenado', 'inconsciente',
@@ -26,16 +27,41 @@ function range(value: Record<string, unknown>) {
   return { bright: distance(value.bright), dim: distance(value.dim), angle: integer(value.angle, 0, 360, 'Ângulo') }
 }
 
+type Bar = { value: number | null; max: number | null; valueFieldId?: string; maxFieldId?: string }
+function barFieldId(value: unknown) {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)) return invalid()
+  return value
+}
+
+export function resolvedBars(bars: Bar[], sheet: StoredSheet | null) {
+  const fields = sheet?.version === 2 ? sheet.pages.flatMap(page => page.fields) : sheet?.fields ?? []
+  const values = new Map(fields.map(field => [field.id, field.value]))
+  function resolve(id: string | undefined, manual: number | null, minimum: number) {
+    if (id === undefined) return manual
+    const raw = values.get(id)?.trim()
+    const value = raw && /^[-+]?\d+(?:[.,]0+)?$/.test(raw) ? Number(raw.replace(',', '.')) : NaN
+    return Number.isInteger(value) && value >= minimum && value <= 2147483647 ? value : null
+  }
+  return bars.map(bar => ({
+    value: resolve(bar.valueFieldId, bar.value, -2147483648),
+    max: resolve(bar.maxFieldId, bar.max, 1),
+  }))
+}
+
 export function tokenSettings(input: unknown) {
   const { bars, auras, conditions, image, vision, light } = record(input)
+  if (!Array.isArray(bars) || bars.length > 12) return invalid()
   const imageData = record(image)
   const visionData = record(vision)
   if (!Array.isArray(conditions) || conditions.some(id => typeof id !== 'string' || !conditionIds.has(id))
     || conditions.length !== new Set(conditions).size) return invalid()
   return {
-    bars: settingsArray(bars, 3).map(bar => ({
+    bars: bars.map(record).map(bar => ({
       value: bar.value === null ? null : integer(bar.value, -2147483648, 2147483647, 'Valor da barra'),
       max: bar.max === null ? null : integer(bar.max, 1, 2147483647, 'Máximo da barra'),
+      valueFieldId: barFieldId(bar.valueFieldId),
+      maxFieldId: barFieldId(bar.maxFieldId),
     })),
     auras: settingsArray(auras, 2).map(aura => {
       if ((aura.shape !== 'circle' && aura.shape !== 'square') || typeof aura.color !== 'string'
