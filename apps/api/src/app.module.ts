@@ -204,7 +204,7 @@ class ApiController {
   @Get('campaigns/:id/tabletop') async tabletop(@Param('id') id: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store')
     const access = await this.tableAccess(id, req)
-    const [sceneList, tokens, messages, members, objects, folders, characters] = await Promise.all([
+    const [sceneList, tokens, messages, members, objects, folders, characters, characterFolders] = await Promise.all([
       this.db.pool.query('SELECT * FROM tabletop_scenes WHERE campaign_id=$1 AND ($2::boolean OR id=$3) ORDER BY created_at,id', [id, access.master, access.scene.id]),
       this.db.pool.query("SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.width,t.height,t.rotation,t.layer,c.token_file FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND t.scene_id=$2 AND ($3::boolean OR t.layer<>'mestre') ORDER BY t.created_at,t.id", [id,access.scene.id,access.master]),
       this.db.pool.query(`SELECT * FROM (SELECT m.id::text,m.content,m.roll,m.created_at,u.name AS author,u.id AS user_id FROM tabletop_messages m
@@ -213,9 +213,12 @@ class ApiController {
         WHERE u.id=$2 OR EXISTS(SELECT 1 FROM campaign_members m WHERE m.campaign_id=$1 AND m.user_id=u.id) ORDER BY u.name`, [id, access.campaign.owner_id]),
       this.db.pool.query("SELECT id,name,layer,x,y,width,height,rotation FROM tabletop_objects WHERE campaign_id=$1 AND scene_id=$2 AND ($3::boolean OR layer<>'mestre') ORDER BY created_at,id",[id,access.scene.id,access.master]),
       this.db.pool.query('SELECT id,name FROM tabletop_scene_folders WHERE campaign_id=$1 AND $2::boolean ORDER BY lower(name),id',[id,access.master]),
-      this.db.pool.query('SELECT * FROM tabletop_characters WHERE campaign_id=$1 AND ($2::boolean OR owner_id=$3) ORDER BY created_at,id',[id,access.master,access.user.id]),
+      this.db.pool.query('SELECT * FROM tabletop_characters WHERE campaign_id=$1 AND ($2::boolean OR owner_id=$3 OR $3=ANY(visible_to)) ORDER BY created_at,id',[id,access.master,access.user.id]),
+      this.db.pool.query(`SELECT f.id,f.name FROM tabletop_character_folders f WHERE f.campaign_id=$1
+        AND ($2::boolean OR EXISTS(SELECT 1 FROM tabletop_characters c WHERE c.folder_id=f.id
+        AND (c.owner_id=$3 OR $3=ANY(c.visible_to)))) ORDER BY lower(f.name),f.id`,[id,access.master,access.user.id]),
     ])
-    return { characters:characters.rows.map(character=>this.characters.present(character)), folders:folders.rows, campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: tokens.rows.map(({token_file,...token})=>({...token,token_url:token_file?`/api/campaigns/${id}/tabletop/characters/${token.character_id}/images/token/${token_file}`:null})), objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), messages: messages.rows, members: members.rows }
+    return { characters:characters.rows.map(character=>this.characters.present(character, { editable: access.master || character.owner_id === access.user.id, master: access.master })), character_folders:characterFolders.rows, folders:folders.rows, campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: tokens.rows.map(({token_file,...token})=>({...token,token_url:token_file?`/api/campaigns/${id}/tabletop/characters/${token.character_id}/images/token/${token_file}`:null})), objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), messages: messages.rows, members: members.rows }
   }
   @Post('campaigns/:id/tabletop/settings') async tableSettings(@Param('id') id: string, @Body() body: Record<string, unknown>, @Req() req: Request) {
     this.accounts.mutation(req)
@@ -398,6 +401,31 @@ class ApiController {
   @Post('campaigns/:id/tabletop/characters/:characterId/present') async presentCharacter(@Param('id') id:string,@Param('characterId') characterId:string,@Req() req:Request){
     this.accounts.mutation(req)
     return this.characters.showCard(await this.tableAccess(id,req),characterId)
+  }
+  @Post('campaigns/:id/tabletop/character-folders') async createCharacterFolder(@Param('id') id: string, @Body() body: unknown, @Req() req: Request) {
+    this.accounts.mutation(req)
+    if (!(await this.tableAccess(id, req)).master) throw new ForbiddenException('Somente o mestre pode organizar personagens.')
+    const name = field(body, 'name', 1, 100)
+    try {
+      const { rows } = await this.db.pool.query('INSERT INTO tabletop_character_folders(id,campaign_id,name) VALUES($1,$2,$3) RETURNING id,name',[randomUUID(),id,name])
+      return rows[0]
+    } catch (error) {
+      if ((error as {code?: string}).code === '23505') throw new ConflictException('Já existe uma pasta de personagens com esse nome.')
+      throw error
+    }
+  }
+  @Post('campaigns/:id/tabletop/character-folders/:folderId/remove') async removeCharacterFolder(@Param('id') id: string, @Param('folderId') folderId: string, @Req() req: Request) {
+    this.accounts.mutation(req)
+    if (!(await this.tableAccess(id, req)).master) throw new ForbiddenException('Somente o mestre pode organizar personagens.')
+    if (!uuid.test(folderId)) throw new BadRequestException('Pasta inválida.')
+    const result = await this.db.pool.query('DELETE FROM tabletop_character_folders WHERE campaign_id=$1 AND id=$2',[id,folderId])
+    if (!result.rowCount) throw new NotFoundException('Pasta não encontrada nesta campanha.')
+    return { ok: true }
+  }
+  @Post('campaigns/:id/tabletop/characters/:characterId/folder') async moveCharacterFolder(@Param('id') id: string, @Param('characterId') characterId: string, @Body() body: Record<string,unknown>, @Req() req: Request) {
+    this.accounts.mutation(req)
+    if (!(await this.tableAccess(id, req)).master) throw new ForbiddenException('Somente o mestre pode organizar personagens.')
+    return this.characters.moveFolder(id, characterId, body?.folder_id)
   }
   @Post('campaigns/:id/tabletop/characters')
   @UseInterceptors(FileFieldsInterceptor(characterImageParts,{limits:{fileSize:MAX_IMAGE_BYTES,files:characterImageParts.length,fields:10,fieldSize:MAX_SHEET_BYTES}}))

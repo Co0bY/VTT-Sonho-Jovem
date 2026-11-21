@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import FilterSelect from './FilterSelect.vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { sheetError, type CharacterSheet } from '../tabletop/character-sheet'
 
 type Model = { id: string; name: string; global: 'S' | 'N'; author: string }
@@ -15,6 +16,10 @@ const emit = defineEmits<{
 
 const models = ref<Model[]>()
 const selected = ref('')
+const modelOptions = computed(() => [{ value: '', label: 'Selecione um modelo' }, ...(models.value ?? []).map(model => ({
+  value: model.id,
+  label: `${model.name} · ${model.global === 'S' ? `Global · ${model.author}` : 'Privado'}`,
+}))])
 const name = ref('')
 const global = ref(false)
 const busy = ref(false)
@@ -120,12 +125,7 @@ function importModel() {
       <fieldset :disabled="disabled || busy">
         <legend>Importar modelo</legend>
         <label>Modelo disponível
-          <select v-model="selected">
-            <option value="">Selecione um modelo</option>
-            <option v-for="model in models" :key="model.id" :value="model.id">
-              {{ model.name }} · {{ model.global === 'S' ? `Global · ${model.author}` : 'Privado' }}
-            </option>
-          </select>
+          <FilterSelect v-model="selected" :options="modelOptions" :disabled="disabled || busy" />
         </label>
         <p>A importação substitui a ficha em edição. Ela é gravada ao salvar o personagem.</p>
         <button type="button" class="text-button" :disabled="!selected" @click="importModel">Substituir ficha pelo modelo</button>

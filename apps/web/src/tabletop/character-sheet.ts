@@ -8,7 +8,7 @@ export type FieldType = 'text' | 'textarea' | 'number' | 'bar' | 'select' | 'rad
 export type SheetField = {
   id:string; label:string; reference:string; type:FieldType
   x:number; y:number; width:number; height:number; value:string
-  highlight:boolean; hideLabel:boolean; readOnly?:boolean; maximum:number; options:string[]
+  highlight:boolean; hideLabel:boolean; readOnly?:boolean; tokenShortcut?:boolean; maximum:number; options:string[]
 }
 export type SheetPage = {
   id:string; width:number; height:number; fields:SheetField[]
@@ -21,7 +21,7 @@ export type CharacterSheet = {
 }
 type LegacySheet = {
   version:1; width:number; height:number
-  fields:Omit<SheetField,'height'|'highlight'|'hideLabel'|'maximum'|'options'>[]
+  fields:Omit<SheetField,'height'|'highlight'|'hideLabel'|'tokenShortcut'|'maximum'|'options'>[]
 }
 export type SavedSheet = LegacySheet | CharacterSheet
 

@@ -263,6 +263,23 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
           created_at timestamptz NOT NULL DEFAULT now(),
           UNIQUE(id,campaign_id)
         );
+        CREATE TABLE IF NOT EXISTS tabletop_character_folders (
+          id uuid PRIMARY KEY,
+          campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+          name varchar(100) NOT NULL CHECK(length(btrim(name))>0),
+          UNIQUE(id,campaign_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS tabletop_character_folder_name_unique
+          ON tabletop_character_folders(campaign_id,lower(btrim(name)));
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS folder_id uuid;
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS visible_to uuid[] NOT NULL DEFAULT '{}';
+        DO $$ BEGIN
+          IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='tabletop_character_folder_fk') THEN
+            ALTER TABLE tabletop_characters ADD CONSTRAINT tabletop_character_folder_fk FOREIGN KEY(folder_id,campaign_id)
+              REFERENCES tabletop_character_folders(id,campaign_id) ON DELETE SET NULL (folder_id);
+          END IF;
+        END $$;
+        CREATE INDEX IF NOT EXISTS tabletop_character_folder_idx ON tabletop_characters(folder_id);
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '' CHECK(length(description)<=20000);
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS notes text NOT NULL DEFAULT '' CHECK(length(notes)<=20000);
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS sheet jsonb NOT NULL DEFAULT '{"version":1,"width":800,"height":1100,"fields":[]}'::jsonb CHECK(jsonb_typeof(sheet)='object');

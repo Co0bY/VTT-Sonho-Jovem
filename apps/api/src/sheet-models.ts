@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { randomUUID } from 'node:crypto'
 import { open } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { characterSheet, sheetPageParts, type PagedSheet } from './character-sheet'
+import { characterSheet, sheetPageParts, validateSheetFieldLimit, type PagedSheet } from './character-sheet'
 import type { CharacterFiles } from './characters'
 import { Database } from './database'
 import { Storage } from './storage'
@@ -31,6 +31,7 @@ export class SheetModels {
     if (!name || name.length > 80) throw new BadRequestException('Informe um nome de até 80 caracteres para o modelo.')
     if (global !== 'S' && global !== 'N') throw new BadRequestException('A visibilidade deve ser S ou N.')
     const sheet = characterSheet(body.sheet)
+    validateSheetFieldLimit(sheet)
     if (sheet.version !== 2 || sheetPageParts.some((part, index) => files[part]?.length && !sheet.pages[index])) {
       throw new BadRequestException('Envie as páginas da ficha e seus respectivos fundos.')
     }
