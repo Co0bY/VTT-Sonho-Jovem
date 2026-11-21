@@ -230,7 +230,9 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
       <label>Nome do personagem<input v-model="name" maxlength="40" :disabled="busy" placeholder="Ex.: Guardião da floresta"></label>
       <template v-if="master"><label for="character-owner">Controlado por</label><select id="character-owner" v-model="owner" required :disabled="busy"><option v-for="member in members" :key="member.id" :value="member.id">{{ member.name }} ({{ member.role === 'mestre' ? 'mestre' : 'jogador' }})</option></select></template>
       <q-select v-if="master" v-model="visibleTo" :options="viewerOptions" label="Visível para"
-        multiple use-chips emit-value map-options outlined dark :disable="busy" class="character-visibility" />
+        multiple emit-value map-options outlined dark hide-dropdown-icon :disable="busy" class="character-visibility">
+        <template #append><span aria-hidden="true">▾</span></template>
+      </q-select>
       <p v-if="master" class="character-hint">O mestre e o controlador sempre podem ver a ficha.</p>
       <label class="character-color">Cor de identificação<input v-model="color" type="color" :disabled="busy"></label>
       <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
@@ -260,6 +262,7 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
 </template>
 <style scoped>
 .character-visibility { margin:12px 0 4px; }
+.character-visibility :deep(.q-field__native) { min-width:0;overflow-wrap:anywhere; }
 .character-readonly { display:grid;gap:12px; }
 .character-readonly img { max-width:180px;max-height:220px;object-fit:contain;border-radius:8px; }
 .character-dialog-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
