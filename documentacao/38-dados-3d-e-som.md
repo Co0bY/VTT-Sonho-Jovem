@@ -1,6 +1,6 @@
 # Dados 3D e som da mesa
 
-Cada nova rolagem do chat aparece no tabuleiro como uma sequência curta de dados. O efeito vale para comandos, atalhos e macros com um ou mais grupos. A animação usa os valores sorteados pelo servidor e termina mostrando essas faces. Participantes que já estão na mesa veem as novas rolagens na próxima sincronização.
+Cada nova rolagem do chat aparece no tabuleiro como uma sequência curta de dados. O efeito vale para comandos, atalhos e macros com um ou mais grupos. A animação usa os valores sorteados pelo servidor. As faces finais ficam visíveis até o próximo clique na mesa, inclusive em um controle que você queira usar. Se houver outra rolagem aguardando, ela começa após o clique. O Canvas para de redesenhar assim que a animação termina. Participantes que já estão na mesa veem as novas rolagens na próxima sincronização.
 
 ## Decisões
 
@@ -10,7 +10,7 @@ O áudio é sintetizado pela Web Audio API. O navegador libera o som após a pri
 
 ## Como verificar
 
-Envie `/roll 2d6+3` no chat e compare as duas faces do efeito com as duas faces da mensagem. O modificador aparece no total. Teste d4, d10 e d20 para conferir as formas. Depois silencie o som, faça outra rolagem e confira que o efeito visual continua.
+Envie `/roll 2d6+3` no chat e compare as duas faces do efeito com as duas faces da mensagem. O modificador aparece no total. Teste d4, d10 e d20 para conferir as formas. Aguarde as faces pararem e clique no título ou no campo do chat. Confira que os dados somem e que o campo ainda recebe foco normalmente. Depois silencie o som, faça outra rolagem e confira que o efeito visual continua.
 
 ## Paginação do chat
 

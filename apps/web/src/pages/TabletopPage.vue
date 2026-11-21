@@ -62,6 +62,9 @@ function nextDiceBatch(){
   activeDice.value=diceQueue.shift()
   if(activeDice.value&&!diceMuted.value)diceSound.play(activeDice.value.dice.length)
 }
+function dismissDice() {
+  if (activeDice.value) nextDiceBatch()
+}
 function scrollChatToEnd() {
   const element = chatList.value
   if (element) element.scrollTop = element.scrollHeight
@@ -192,10 +195,12 @@ async function addImage(){if(!objectFile.value)return;await action(async()=>{con
 watch(editingLayer,()=>{selected.value='';tool.value='select'},{flush:'sync'})
 watch(chatList, scrollChatToEnd, { flush: 'post' })
 onMounted(async () => {
+  window.addEventListener('click',dismissDice,true)
   window.addEventListener('pointerdown',unlockDiceSound)
   window.addEventListener('keydown',unlockDiceSound)
   try { await refresh() } catch (e) { report(e) } finally { loading.value = false; if (!disposed && !accessDenied.value) timer = setTimeout(poll, 2000) } })
 onBeforeUnmount(() => {
+  window.removeEventListener('click',dismissDice,true)
   window.removeEventListener('pointerdown',unlockDiceSound)
   window.removeEventListener('keydown',unlockDiceSound)
   diceSound.close()
@@ -204,7 +209,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="tabletop-page">
-    <DiceRollOverlay v-if="activeDice" :key="activeDice.id" :dice="activeDice.dice" @finished="nextDiceBatch" />
+    <DiceRollOverlay v-if="activeDice" :key="activeDice.id" :dice="activeDice.dice" />
     <header class="table-header"><router-link to="/" class="table-back" aria-label="Voltar às minhas mesas">‹ <span>Minhas mesas</span></router-link><div class="table-title"><span class="table-logo">✦</span><div><h1>{{ state?.campaign.name || 'Mesa virtual' }}</h1><span>{{ state?.campaign.system || 'Sonho Jovem' }}</span></div></div><div class="table-header-right"><button v-if="state" type="button" class="table-button" aria-label="Silenciar som dos dados" :aria-pressed="diceMuted" :title="diceMuted ? 'Ativar som dos dados' : 'Silenciar som dos dados'" @click="toggleDiceSound">{{ diceMuted ? '♪ ×' : '♪' }}</button><span v-if="state" class="table-role">{{ master ? 'Mestre' : 'Jogador' }}</span><button class="table-button" :aria-expanded="sidebar" aria-label="Mostrar ou ocultar painel da mesa" @click="sidebar = !sidebar">☷ <span>Painel</span></button></div></header>
     <div v-if="loading" class="table-loading" role="status">Preparando a mesa e reunindo as histórias…</div>
     <div v-else-if="!state" class="table-loading"><h2>{{ loginRequired ? 'Entre para acessar a mesa' : 'Não foi possível abrir a mesa' }}</h2><p role="alert">{{ error }}</p><a v-if="loginRequired" :href="loginLink" class="primary">Entrar na conta</a><router-link v-else to="/" class="primary">Voltar às minhas mesas</router-link></div>

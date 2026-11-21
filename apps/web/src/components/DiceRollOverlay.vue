@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { drawDie, type VisualDie } from '../tabletop/dice-visuals'
 
 const props=defineProps<{ dice:VisualDie[] }>()
-const emit=defineEmits<{finished:[]}>()
 const canvas=ref<HTMLCanvasElement>()
 const visibleDice=computed(()=>props.dice.slice(0,30))
 const remaining=computed(()=>props.dice.length-visibleDice.value.length)
@@ -14,7 +13,7 @@ watch(canvas,element=>{
   const context=element.getContext('2d')
   const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const start=performance.now()
-  const duration=reduced?1500:2150
+  const duration=reduced?0:1000+((Math.min(visibleDice.value.length,6)-1)*35)
   function paint(now:number) {
     const width=element!.clientWidth
     const cell=Math.min(68,Math.max(40,Math.floor(width/5)))
@@ -45,7 +44,6 @@ watch(canvas,element=>{
       context.fillText(`d${die.sides}`,x,(row+.91)*cell)
     }
     if(now-start<duration)frame=requestAnimationFrame(paint)
-    else emit('finished')
   }
   frame=requestAnimationFrame(paint)
 },{flush:'post'})

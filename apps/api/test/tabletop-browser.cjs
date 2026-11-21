@@ -205,6 +205,10 @@ async function main() {
     return canvas?.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data.some((value,index)=>index%4===3&&value>0)
   })
   await page.waitForFunction(()=>window.diceSounds>0)
+  // Wait past the previous automatic dismissal, then click a non-interactive part of the page.
+  await pause(2300)
+  assert.equal(await diceCanvas.isVisible(),true)
+  await page.locator('.table-title h1').click()
   await diceCanvas.waitFor({state:'detached'})
   await page.getByRole('button',{name:'Silenciar som dos dados',exact:true}).click()
   assert.equal(await page.getByRole('button',{name:'Silenciar som dos dados',exact:true}).getAttribute('aria-pressed'),'true')
@@ -212,6 +216,10 @@ async function main() {
   await page.getByRole('button',{name:'d6',exact:true}).click()
   await diceCanvas.waitFor()
   assert.equal(await page.evaluate(()=>window.diceSounds),sounds)
+  const composer=page.getByLabel('Mensagem ou comando de dados')
+  await composer.click()
+  await diceCanvas.waitFor({state:'detached'})
+  assert.equal(await composer.evaluate(el=>document.activeElement===el),true)
   // A second session must receive the persisted messages and be able to move its own token.
   const playerContext=await contextFor(playerToken), playerPage=await playerContext.newPage()
   await playerPage.goto(`http://127.0.0.1:9014/mesas/${campaignId}`)
