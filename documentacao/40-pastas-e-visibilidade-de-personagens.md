@@ -15,3 +15,5 @@ As regras do mapa e das apresentações continuam seguindo suas permissões pró
 3. Exclua a pasta e confira a ficha em **Sem pasta**. Revogue o acesso de um jogador e confira que a ficha sai da aba dele. O token continua conforme as regras da camada no mapa.
 
 A checagem de tipos, o build e os 19 testes unitários passaram. A integração da API cobriu criação, duplicidade, movimentação, exclusão, autorização, fundo privado e independência dos tokens. No Chromium, duas sessões convidadas receberam o acesso pelo multisseletor. O teste também validou a lista compacta, o duplo clique, a leitura multipáginas e a exclusão de pasta preservando a ficha.
+
+A suíte completa de navegador também passou. Durante a validação, o ícone padrão do multisseletor gerava rolagem horizontal no modal quando a fonte de ícones não estava disponível. O seletor passou a usar um indicador que cabe no espaço reservado. O modal foi conferido a 390 px de largura.
