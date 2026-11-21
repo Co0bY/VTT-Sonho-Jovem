@@ -34,7 +34,7 @@ const background=computed(()=>props.backgroundFor(page.value.id))
 const selected=computed(()=>page.value.fields.find(field=>field.id===selectedId.value))
 const fieldCount=computed(()=>props.modelValue.pages.reduce((count,item)=>count+item.fields.length,0))
 const validation=computed(()=>sheetError(props.modelValue))
-const types:Record<FieldType,string>={text:'Texto',number:'Número',bar:'Barra',select:'Lista (select)',radio:'Opção única (radio)',checkbox:'Caixa de seleção (checkbox)'}
+const types:Record<FieldType,string>={text:'Texto',textarea:'Texto multilinha',number:'Número',bar:'Barra',select:'Lista (select)',radio:'Opção única (radio)',checkbox:'Caixa de seleção (checkbox)'}
 const clamp=(value:number,min:number,max:number)=>Math.round(Math.max(min,Math.min(max,Number.isNaN(value)?min:value)))
 let drag:{pointer:number;field:SheetField;clientX:number;clientY:number;corner?:Corner}|undefined
 
@@ -149,7 +149,7 @@ function removeBackground(){
 }
 function changeType(field:SheetField,type:FieldType){
   const options=hasOptions(type)&&!field.options.length?['Opção 1','Opção 2']:field.options
-  const previousText=field.type==='text'||field.type==='number'?field.value:''
+  const previousText=field.type==='text'||field.type==='textarea'||field.type==='number'?field.value:''
   const value=type==='checkbox'?'false':type==='bar'?'0':hasOptions(type)?'':previousText
   updateField(field.id,{type,value,options})
 }
@@ -224,7 +224,7 @@ function stopValueEditing(event:KeyboardEvent){
 }
 function trigger(field:SheetField,event:Event,kind:MacroEvent){
   const target=event.target
-  if(!(target instanceof HTMLInputElement||target instanceof HTMLSelectElement))return
+  if(!(target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement))return
   if(event instanceof KeyboardEvent){
     if(event.isComposing)return
     if(target instanceof HTMLInputElement&&target.type==='text')event.preventDefault()
@@ -285,6 +285,9 @@ defineExpose({finishEditing})
               <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
                 :aria-label="field.label" :value="field.value" :disabled="disabled" :readonly="field.readOnly" :inputmode="field.type==='number'?'decimal':'text'"
                 :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLInputElement).value})">
+              <textarea v-else-if="field.type==='textarea'" :id="`sheet-value-${field.id}`" class="plain-control"
+                :aria-label="field.label" :value="field.value" :disabled="disabled" :readonly="field.readOnly"
+                :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLTextAreaElement).value})" />
               <div v-else-if="field.type==='bar'" class="bar-control">
                 <input :id="`sheet-value-${field.id}`" type="range" min="0" :max="field.maximum" :value="field.value"
                   :style="{'--fill':`${Number(field.value)/field.maximum*100}%`}"
@@ -367,6 +370,8 @@ defineExpose({finishEditing})
             <label><input type="checkbox" :checked="selected.hideLabel" @change="updateField(selected.id,{hideLabel:($event.target as HTMLInputElement).checked})"> Ocultar rótulo</label>
             <label><input type="checkbox" :checked="selected.readOnly"
               @change="editingValue=false;updateField(selected.id,{readOnly:($event.target as HTMLInputElement).checked})"> Somente leitura</label>
+            <label><input type="checkbox" :checked="selected.tokenShortcut === true"
+              @change="updateField(selected.id,{tokenShortcut:($event.target as HTMLInputElement).checked})"> Possui atalho no token</label>
           </div>
           <button type="button" @click="removeField">Excluir campo</button>
         </template>
@@ -414,6 +419,7 @@ defineExpose({finishEditing})
 .field-label { font-size:12px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:none; }
 .field-content .plain-control { width:100%; min-height:0; flex:1; margin:0; padding:0 1px; font-size:var(--field-font,14px); line-height:1; border:1px solid transparent; background:transparent; color:inherit; }
 .field-content .number-control { text-align:center; }
+.field-content textarea.plain-control { resize:none; line-height:1.2; }
 .field-content .plain-control:focus { outline:1px solid #68408c; border-color:#68408c; }
 .field-content select option { background:#fff; color:#211729; }
 .field-content input[type=checkbox], .field-content input[type=radio] { width:auto; align-self:start; margin:2px; accent-color:#68408c; }

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
-import { characterSheet, emptySheet, FIRST_SHEET_PAGE, sheetPageParts, type StoredSheet } from './character-sheet'
+import { characterSheet, emptySheet, FIRST_SHEET_PAGE, sheetPageParts, validateSheetFieldLimit, type StoredSheet } from './character-sheet'
 import sanitizeHtml from 'sanitize-html'
 import { randomUUID } from 'node:crypto'
 import { Database } from './database'
@@ -43,6 +43,7 @@ export class Characters {
       if(body[key]!==undefined&&body.text_format==='html'){body[key]=cleanCharacterHtml(body[key] as string);if((body[key] as string).length>20000)throw new BadRequestException('Texto formatado muito longo.')}
     }
     const sheet=body.sheet===undefined?undefined:characterSheet(body.sheet)
+    validateSheetFieldLimit(sheet, existing?.sheet)
     const name=text('name',40),owner=access.master?text('owner_id',36):existing!.owner_id,color=text('color',7)
     if(!uuid.test(owner)||!/^#[0-9a-f]{6}$/i.test(color))throw new BadRequestException('Cor ou participante inválido.')
     const member=await this.db.pool.query('SELECT id FROM users WHERE id=$1 AND (id=$2 OR EXISTS(SELECT 1 FROM campaign_members WHERE campaign_id=$3 AND user_id=$1))',[owner,access.campaign.owner_id,access.campaign.id])
@@ -62,6 +63,7 @@ export class Characters {
       await client.query('BEGIN')
       let previous:CharacterRow|undefined
       if(id){previous=(await client.query('SELECT * FROM tabletop_characters WHERE id=$1 AND campaign_id=$2 FOR UPDATE',[id,access.campaign.id])).rows[0];if(!previous)throw new NotFoundException('Personagem não encontrado.');if(!access.master&&previous.owner_id!==access.user.id)throw new ForbiddenException('O controle do personagem mudou.')}
+      validateSheetFieldLimit(sheet, previous?.sheet)
       const appearance=saved.find(file=>file.kind==='appearance')?.name??(String(body.remove_appearance)==='true'?null:previous?.appearance_file??null)
       const token=saved.find(file=>file.kind==='token')?.name??(String(body.remove_token)==='true'?null:previous?.token_file??null)
       let background=saved.find(file=>file.kind==='sheet')?.name??(String(body.remove_sheet)==='true'?null:previous?.sheet_background_file??null)
@@ -81,6 +83,10 @@ export class Characters {
           if(backgroundFile===oldBackgrounds.get(page.id))oldBackgrounds.delete(page.id)
           return {...page,backgroundFile}
         })}
+        // Keep data from existing sheets whose technique editor is not part of this build.
+        if (previous?.sheet.version === 2 && previous.sheet.techniques !== undefined) {
+          savedSheet.techniques = previous.sheet.techniques
+        }
         background=null
         for(const name of oldBackgrounds.values())old.push({category:'outros',name})
       }

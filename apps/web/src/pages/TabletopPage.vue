@@ -36,7 +36,7 @@ const tokenRolls = computed(() => {
   return (sheet.macros ?? []).flatMap(rule => {
     if (rule.event !== 'clique' || rule.action.kind !== 'rolar') return []
     const field = fields.find(field => field.id === rule.fieldId)
-    return field ? [{ id: field.id, label: field.label || field.reference, value: field.value, action: rule.action }] : []
+    return field?.tokenShortcut === true ? [{ id: field.id, label: field.label || field.reference, value: field.value, action: rule.action }] : []
   })
 })
 const loginLink = `/?retorno=${encodeURIComponent(`/mesas/${id}`)}`

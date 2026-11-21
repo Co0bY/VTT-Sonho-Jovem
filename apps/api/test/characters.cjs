@@ -66,8 +66,8 @@ async function main(){
  const firstPage='00000000-0000-4000-8000-000000000001'
  const defaults={height:64,highlight:false,hideLabel:false,maximum:100,options:[]}
  const pages=[
-  {id:firstPage,width:800,height:1100,fields:[{...defaults,...layout.fields[0]}]},
-  {id:randomUUID(),width:800,height:600,fields:[{...defaults,id:randomUUID(),label:'Vida',reference:'vida',type:'bar',maximum:40,x:0,y:0,width:200,value:'23'}]},
+  {id:firstPage,width:800,height:1100,fields:[{...defaults,...layout.fields[0],tokenShortcut:true}]},
+  {id:randomUUID(),width:800,height:600,fields:[{...defaults,id:randomUUID(),label:'Vida',reference:'vida',type:'bar',tokenShortcut:false,maximum:40,x:0,y:0,width:200,value:'23'}]},
  ]
  const sheetV2={version:2,pages}
  const migration=form('Duas páginas',player)
@@ -76,16 +76,31 @@ async function main(){
  const migrated=await request(`${base}/characters/${empty.id}/settings`,201,migration,1)
  assert.equal(migrated.sheet.pages[0].backgroundUrl,legacyAgain.sheet_background_url)
  assert.deepEqual(migrated.sheet.pages[0].fields,pages[0].fields)
+ assert.deepEqual(migrated.sheet.pages[1].fields,pages[1].fields)
  const secondBackground=migrated.sheet.pages[1].backgroundUrl
  await asset(legacyAgain.sheet_background_url,200,1,image(80,110))
  await asset(secondBackground,200,1,image(80,60))
  await asset(secondBackground,200,0,image(80,60))
  await asset(secondBackground,403,2)
- for(const invalid of [{value:'41'},{reference:'for'},{height:601},{width:11},{type:'checkbox',value:'1'},{type:'radio',options:['A'],value:'B'}]){
+ for(const invalid of [{tokenShortcut:'true'},{value:'41'},{reference:'for'},{height:601},{width:11},{type:'checkbox',value:'1'},{type:'radio',options:['A'],value:'B'}]){
   const update=form('Ficha inválida',player)
   update.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],fields:[{...pages[1].fields[0],...invalid}]}]}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)
  }
+ const oversized={...sheetV2,pages:[pages[0],{...pages[1],fields:Array.from({length:100},(_,i)=>({
+  ...pages[1].fields[0],id:randomUUID(),reference:`vida_${i}`,
+ }))}]}
+ const oversizedForm=form('Ficha existente',player)
+ oversizedForm.append('sheet',JSON.stringify(oversized))
+ await request(`${base}/characters/${empty.id}/settings`,400,oversizedForm,1)
+ const stored=(await db.query('SELECT sheet FROM tabletop_characters WHERE id=$1',[empty.id])).rows[0].sheet
+ const techniques=[{label:'Técnica existente'}]
+ await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[{...oversized,techniques},empty.id])
+ const preservedLargeSheet=await request(`${base}/characters/${empty.id}/settings`,201,oversizedForm,1)
+ assert.equal(preservedLargeSheet.sheet.pages.flatMap(page=>page.fields).length,101)
+ assert.equal(preservedLargeSheet.sheet.pages[0].fields[0].tokenShortcut,true)
+ assert.deepEqual(preservedLargeSheet.sheet.techniques,techniques)
+ await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[stored,empty.id])
  const macro={fieldId:pages[1].fields[0].id,event:'clique',action:{kind:'rolar',sides:6}}
  for(const invalid of [[macro,macro],[{...macro,fieldId:randomUUID()}],[{...macro,event:'focus'}],[{...macro,action:{kind:'rolar',sides:1}}]]){
   const update=form('Regra inválida',player)

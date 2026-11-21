@@ -3,11 +3,11 @@ import type { SheetMacro } from './sheet-macros'
 export const MAX_SHEET_PAGES = 5
 const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
 
-export type FieldType = 'text' | 'number' | 'bar' | 'select' | 'radio' | 'checkbox'
+export type FieldType = 'text' | 'textarea' | 'number' | 'bar' | 'select' | 'radio' | 'checkbox'
 export type SheetField = {
   id:string; label:string; reference:string; type:FieldType
   x:number; y:number; width:number; height:number; value:string
-  highlight:boolean; hideLabel:boolean; readOnly?:boolean; maximum:number; options:string[]
+  highlight:boolean; hideLabel:boolean; readOnly?:boolean; tokenShortcut?:boolean; maximum:number; options:string[]
 }
 export type SheetPage = {
   id:string; width:number; height:number; fields:SheetField[]
@@ -16,7 +16,7 @@ export type SheetPage = {
 export type CharacterSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]}
 type LegacySheet = {
   version:1; width:number; height:number
-  fields:Omit<SheetField,'height'|'highlight'|'hideLabel'|'maximum'|'options'>[]
+  fields:Omit<SheetField,'height'|'highlight'|'hideLabel'|'tokenShortcut'|'maximum'|'options'>[]
 }
 export type SavedSheet = LegacySheet | CharacterSheet
 
