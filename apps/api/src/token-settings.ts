@@ -43,10 +43,11 @@ export function resolvedBars(bars: Bar[], sheet: StoredSheet | null) {
     const value = raw && /^[-+]?\d+(?:[.,]0+)?$/.test(raw) ? Number(raw.replace(',', '.')) : NaN
     return Number.isInteger(value) && value >= minimum && value <= 2147483647 ? value : null
   }
-  return bars.map(bar => ({
-    value: resolve(bar.valueFieldId, bar.value, -2147483648),
-    max: resolve(bar.maxFieldId, bar.max, 1),
-  }))
+  return bars.map(bar => {
+    const value = resolve(bar.valueFieldId, bar.value, -2147483648)
+    const max = resolve(bar.maxFieldId, bar.max, 1)
+    return value === null || max === null ? { value: null, max: null } : { value, max }
+  })
 }
 
 export function tokenSettings(input: unknown) {
