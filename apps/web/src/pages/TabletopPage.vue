@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import FilterSelect from '../components/FilterSelect.vue'
+import { selectOptions } from '../tabletop/select-options'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import DiceRollOverlay from '../components/DiceRollOverlay.vue'
@@ -6,7 +8,7 @@ import { newDiceBatches } from '../tabletop/dice-visuals'
 import { createDiceSound } from '../tabletop/dice-sound'
 import TabletopBoard from '../components/TabletopBoard.vue'
 import ScenesMenu from '../components/ScenesMenu.vue'
-import { reductions, type MacroMessage } from '../tabletop/sheet-macros'
+import { macroMessage, reductions, type MacroAction, type MacroMessage } from '../tabletop/sheet-macros'
 import CharacterDialog from '../components/CharacterDialog.vue'
 import CharacterCardDialog from '../components/CharacterCardDialog.vue'
 import { editorHtml } from '../tabletop/rich-text'
@@ -26,13 +28,28 @@ const hasOlderMessages = ref(false), loadingOlderMessages = ref(false), historyE
 const presentationCard=ref<CharacterCard|null>(null),presentationError=ref('')
 const presentationQueue:CharacterCard[]=[]
 let presentationCursor:string|undefined
+const compactCharacters=ref(false)
 const characterDialog=ref(false),characterTarget=ref<Character|null>(null)
 
 const editingLayer=ref<Layer>('geral'),objectName=ref(''),objectFile=ref<File>(),objectInput=ref<HTMLInputElement>()
 const transformTarget=ref<{id:string;name:string;rect:Rect;layer:Layer}|null>(null)
 const master = computed(() => state.value?.role === 'mestre')
+const sharedCharacter = computed(() => !!characterTarget.value && !master.value && characterTarget.value.owner_id !== state.value?.user.id)
 const selectedToken = computed(() => state.value?.tokens.find(t => t.id === selected.value))
+const tokenRolls = computed(() => {
+  const token = selectedToken.value
+  if (!token || (!master.value && token.owner_id !== state.value?.user.id)) return []
+  const sheet = state.value?.characters.find(character => character.id === token.character_id)?.sheet
+  if (sheet?.version !== 2) return []
+  const fields = sheet.pages.flatMap(page => page.fields)
+  return (sheet.macros ?? []).flatMap(rule => {
+    if (rule.event !== 'clique' || rule.action.kind !== 'rolar') return []
+    const field = fields.find(field => field.id === rule.fieldId)
+    return field?.tokenShortcut === true ? [{ id: field.id, label: field.label || field.reference, value: field.value, action: rule.action, fields }] : []
+  })
+})
 const loginLink = `/?retorno=${encodeURIComponent(`/mesas/${id}`)}`
+const editingLayers = selectOptions({ fundo: 'Fundo', mestre: 'Mestre · só você vê', geral: 'Geral' })
 const tabs = [{ id: 'chat', label: 'Chat', icon: '☷' }, { id: 'characters', label: 'Personagens', icon: '◉' }, { id: 'members', label: 'Grupo', icon: '♙' }, { id: 'settings', label: 'Cenários', icon: '▦' },{ id:'layers',label:'Camadas',icon:'▱' }]
 let timer: ReturnType<typeof setTimeout> | undefined, disposed = false, revision = 0
 const abort = new AbortController()
@@ -119,6 +136,10 @@ async function refresh() {
   }
   if(!activeDice.value)nextDiceBatch()
   state.value = data
+  if (characterDialog.value && characterTarget.value && !master.value) {
+    const current = data.characters.find(character => character.id === characterTarget.value?.id)
+    if (!current || current.owner_id !== characterTarget.value.owner_id) characterDialog.value = false
+  }
   if (shouldScroll && element) {
     await nextTick()
     if (element === chatList.value) scrollChatToEnd()
@@ -155,6 +176,15 @@ async function presentCard(characterId:string){
 }
 function openCharacter(character:Character|null=null){error.value='';characterTarget.value=character;characterDialog.value=true}
 async function saveCharacter(characterId:string|null,data:FormData){return action(async()=>{await api(characterId?`${endpoint}/characters/${characterId}/settings`:`${endpoint}/characters`,data)})}
+function createCharacterFolder(name: string) {
+  return action(async () => { await api(`${endpoint}/character-folders`, { name }) })
+}
+function removeCharacterFolder(folderId: string) {
+  return action(async () => { await api(`${endpoint}/character-folders/${folderId}/remove`, {}) })
+}
+function moveCharacterFolder(characterId: string, folderId: string | null) {
+  return action(async () => { await api(`${endpoint}/characters/${characterId}/folder`, { folder_id: folderId }) })
+}
 async function placeCharacter(characterId:string,point?:Point){
   const character=state.value?.characters.find(character=>character.id===characterId)
   if(!character||!master.value)return
@@ -168,6 +198,9 @@ async function removeToken(tokenId: string) { await action(async () => { await a
 async function removeObject(objectId:string){return action(async()=>{await api(`${endpoint}/objects/${objectId}/remove`,{});selected.value=''})}
 function removeSelected(targetId:string){if(targetId.startsWith('object:'))void removeObject(targetId.slice(7));else void removeToken(targetId)}
 async function sendMacro(message:MacroMessage){return api(`${endpoint}/messages`,message)}
+async function rollFromToken(roll: { action: Extract<MacroAction, { kind: 'rolar' }>; value: string; fields: { id: string; value: string }[] }) {
+  await action(async () => { await sendMacro(macroMessage(roll.action, roll.value, id => roll.fields.find(field => field.id === id)?.value)) })
+}
 async function send(content = draft.value) {
   if (!content.trim()) return
   const sent = await action(async () => {
@@ -217,9 +250,14 @@ onBeforeUnmount(() => {
       <div v-if="error || networkError" class="table-error" role="alert">{{ error || networkError }} <button @click="error = ''; networkError = ''" aria-label="Fechar mensagem">×</button></div>
       <div class="table-workspace" :class="{ 'panel-hidden': !sidebar }">
         <nav class="table-tools" aria-label="Ferramentas da mesa"><div class="tool-group"><button :class="{ active: tool === 'select' }" :aria-pressed="tool === 'select'" title="Selecionar e mover tokens" aria-label="Selecionar e mover tokens" @click="tool = 'select'">↖</button><button :class="{ active: tool === 'pan' }" :aria-pressed="tool === 'pan'" title="Mover câmera" aria-label="Mover câmera" @click="tool = 'pan'">✥</button><button :class="{ active: tool === 'measure' }" :aria-pressed="tool === 'measure'" title="Medir distância" aria-label="Medir distância" @click="tool = 'measure'">↔</button></div><div class="tool-group"><button v-if="master" title="Novo personagem" aria-label="Novo personagem" @click="panel = 'characters'; sidebar = true; openCharacter()">+</button><button title="Configurar cenário" aria-label="Configurar cenário" @click="panel = 'settings'; sidebar = true">▦</button><button title="Centralizar cenário" aria-label="Centralizar cenário" @click="board?.center()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 12h10m-5-5v10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div><span class="tools-bottom">SJ</span></nav>
-        <section class="table-scene" aria-label="Área de jogo"><div v-if="master" class="layer-picker"><label for="active-layer">Camada de edição</label><select id="active-layer" v-model="editingLayer"><option value="fundo">Fundo</option><option value="mestre">Mestre · só você vê</option><option value="geral">Geral</option></select></div><div class="scene-caption"><span class="scene-dot"></span> {{ state.scene.name }} <span class="scene-dimensions">{{ Math.ceil(state.scene.width / state.scene.cell_size) }} × {{ Math.ceil(state.scene.height / state.scene.cell_size) }} células · {{ state.scene.snap && state.scene.grid_type !== 'none' ? 'Encaixe ativo' : 'Movimento livre' }}</span></div>
+        <section class="table-scene" aria-label="Área de jogo"><div v-if="master" class="layer-picker"><label for="active-layer">Camada de edição</label><FilterSelect id="active-layer" aria-label="Camada de edição" v-model="editingLayer" :options="editingLayers" compact /></div><div class="scene-caption"><span class="scene-dot"></span> {{ state.scene.name }} <span class="scene-dimensions">{{ Math.ceil(state.scene.width / state.scene.cell_size) }} × {{ Math.ceil(state.scene.height / state.scene.cell_size) }} células · {{ state.scene.snap && state.scene.grid_type !== 'none' ? 'Encaixe ativo' : 'Movimento livre' }}</span></div>
           <TabletopBoard :key="state.scene.id" ref="board" :scene="state.scene" :tokens="state.tokens" :objects="state.objects" :layer="master ? editingLayer : 'geral'" :user-id="state.user.id" :master="master" :tool="tool" :selected="selected" :locked="busy" @move="moveToken" @resize="resizeToken" @rotate="rotateToken" @select="selected = $event" @zoom="zoom = $event" @transform="transformImage" @edit="editImage" @remove="removeSelected" @place="placeCharacter" />
-          <div v-if="selectedToken" class="selection-info"><span :style="{ background: selectedToken.color }"></span><strong>{{ selectedToken.name }}</strong><small>{{ master || selectedToken.owner_id === state.user.id ? (master ? 'Cantos: tamanho · Alça circular: girar · Alt: livre · Del: remover' : 'Arraste ou use as setas') : 'Controlado por outro participante' }}</small><button @click="selected = ''" aria-label="Desmarcar token">×</button></div>
+          <div v-if="selectedToken" class="selection-info">
+            <span aria-hidden="true" :style="{ background: selectedToken.color }"></span>
+            <strong>{{ selectedToken.name }}</strong>
+            <button v-for="roll in tokenRolls" :key="roll.id" type="button"
+              :aria-label="`Rolar ${roll.label}`" :disabled="busy" @click="rollFromToken(roll)">{{ roll.label }}</button>
+          </div>
           <div class="scene-controls"><span>{{ tool === 'measure' ? `Arraste entre centros · Alt: livre · 1 célula = ${state.scene.distance_per_cell} ${state.scene.distance_unit}` : tool === 'pan' ? 'Arraste o cenário para navegar' : master && (selected === 'background' || selected.startsWith('object:')) ? 'Cantos: proporção/grid · Alt: livre · Duplo clique: editar · Del: excluir' : 'Selecione um token · Arraste o fundo para navegar' }}</span><div><button aria-label="Diminuir zoom" @click="board?.zoomBy(0.8)">−</button><output aria-label="Zoom atual">{{ zoom }}%</output><button aria-label="Aumentar zoom" @click="board?.zoomBy(1.25)">+</button><button aria-label="Ajustar cenário à tela" title="Ajustar cenário à tela" @click="board?.center()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 12h10m-5-5v10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div></div>
         </section>
         <aside v-if="sidebar" class="table-panel"><nav class="panel-tabs" aria-label="Painéis da mesa"><button v-for="tab in tabs.filter(tab=>master || tab.id!=='layers')" :key="tab.id" :class="{ active: panel === tab.id }" :aria-pressed="panel === tab.id" :aria-label="tab.label" @click="panel = tab.id"><span>{{ tab.icon }}</span>{{ tab.label }}</button></nav>
@@ -234,14 +272,15 @@ onBeforeUnmount(() => {
             </div>
             <footer v-if="message.roll.combine"><span>{{ reductions[message.roll.combine] }}</span><strong>{{ message.roll.total }}</strong></footer>
           </template><template v-else><div class="dice-values"><b v-for="(value, index) in message.roll.rolls" :key="index">{{ value }}</b><span v-if="message.roll.modifier">{{ message.roll.modifier > 0 ? '+' : '' }}{{ message.roll.modifier }}</span></div><footer><span>RESULTADO</span><strong>{{ message.roll.total }}</strong></footer></template></div><p v-else>{{ message.content }}</p></article></div><div class="chat-composer"><div class="quick-dice"><button v-for="sides in [4,6,8,10,12,20]" :key="sides" :disabled="busy" @click="send(`/roll 1d${sides}`)">d{{ sides }}</button></div><form @submit.prevent="send()"><label class="sr-only" for="table-message">Mensagem ou comando de dados</label><textarea id="table-message" v-model="draft" rows="3" maxlength="2000" placeholder="Sua mensagem ou /roll 2d6+3" @keydown.enter.exact.prevent="send()"></textarea><div><span>Como <strong>{{ state.user.name }}</strong></span><button class="primary" :disabled="busy || !draft.trim()">Enviar ↗</button></div></form><small>Enter envia · Shift + Enter quebra linha</small></div></template>
-          <CharactersPanel v-else-if="panel === 'characters'" :characters="state.characters" :tokens="state.tokens" :members="state.members" :master="master" :busy="busy" :selected="selected" @view="viewCard" @create="openCharacter()" @edit="openCharacter" @place="placeCharacter" @select="selectCharacterToken" @remove="removeToken" @layer="setTokenLayer" />
+          <CharactersPanel v-else-if="panel === 'characters'" :characters="state.characters" :folders="state.character_folders" :user-id="state.user.id"
+            v-model:compact="compactCharacters" :create-folder="createCharacterFolder" :remove-folder="removeCharacterFolder" :move-folder="moveCharacterFolder" :tokens="state.tokens" :members="state.members" :master="master" :busy="busy" :selected="selected" @view="viewCard" @create="openCharacter()" @edit="openCharacter" @place="placeCharacter" @select="selectCharacterToken" @remove="removeToken" @layer="setTokenLayer" />
           <section v-else-if="panel === 'members'" class="panel-content"><div class="panel-heading"><h2>Grupo da campanha</h2><span>{{ state.members.length }} PARTICIPANTES</span></div><p class="panel-help">Pessoas com acesso à mesa. Para convidar mais jogadores, use a opção de convite na dashboard.</p><ul class="member-list"><li v-for="member in state.members" :key="member.id"><span>{{ member.name.slice(0, 1).toUpperCase() }}</span><div><strong>{{ member.name }}{{ member.id === state.user.id ? ' (você)' : '' }}</strong><small>{{ member.role === 'mestre' ? 'Mestre da mesa' : 'Jogador' }}</small></div></li></ul></section>
           <ScenesMenu v-else-if="panel === 'settings'" :error="error" :remove="removeScene" :scenes="state.scenes" :folders="state.folders" :save-folder="saveFolder" :remove-folder="removeFolder" :move-folder="moveSceneFolder" :active-id="state.scene.id" :master="master" :busy="busy" :create="createScene" :save="saveScene" :activate="activateScene" :upload="uploadBackground" />          <section v-else class="panel-content"><div class="panel-heading"><h2>Camadas do cenário</h2><span>{{ master ? editingLayer.toUpperCase() : 'GERAL' }}</span></div><p class="panel-help">Fundo: mapa e composição. Mestre: conteúdo oculto dos jogadores. Geral: tokens e objetos visíveis ao grupo.</p><template v-if="master"><p class="panel-help">Escolha a camada acima do tabuleiro. Selecione uma imagem e arraste os cantos para redimensionar ou a alça circular para girar. Os cantos mantêm a proporção em passos do grid; Alt permite tamanho livre. Duplo clique abre as medidas e a exclusão. Del exclui a seleção.</p><form @submit.prevent="addImage"><label>Nome do objeto<input v-model="objectName" required maxlength="100" placeholder="Ex.: árvore, ponte, pista secreta"></label><label>Imagem do objeto<input ref="objectInput" type="file" accept="image/png,image/jpeg,image/webp" required @change="objectFile = ($event.target as HTMLInputElement).files?.[0]"></label><p class="panel-help">Até 10 MB. Será adicionado à camada {{ editingLayer }}.</p><button class="primary full" :disabled="busy || !objectFile">Adicionar imagem à camada</button></form></template><ul class="layer-object-list"><li v-for="object in state.objects.filter(object => !master || object.layer === editingLayer)" :key="object.id"><img :src="object.image_url" alt=""><div><strong>{{ object.name }}</strong><small>{{ object.layer }}</small></div><button v-if="master" class="text-button" @click="editImage(object.id, object)">Redimensionar</button></li></ul></section>
 
         </aside>
       </div><footer class="table-status"><span><i></i>{{ busy ? 'Salvando…' : error || networkError ? 'Falha de atualização' : 'Alterações salvas no servidor' }}</span><span>Protótipo · atualização a cada 2 s <b>✦ SONHO JOVEM</b></span></footer>
     <CharacterCardDialog :card="presentationCard" :master="master" :busy="busy" :error="presentationError" @close="closeCard" @present="presentCard" />
-    <CharacterDialog :master="master" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
+    <CharacterDialog :master="master" :read-only="sharedCharacter" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
     <ImageTransformDialog :scene="state.scene" :target="transformTarget" :busy="busy" :error="error" :save="transformImage" :remove="removeObject" @close="transformTarget = null" /></template>
   </div>
 </template>

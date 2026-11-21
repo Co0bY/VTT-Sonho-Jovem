@@ -3,20 +3,30 @@ import { diceGroups } from './tabletop-rules'
 export type SheetField={id:string;label:string;reference:string;type:'text'|'number';x:number;y:number;width:number;value:string}
 export type CharacterSheet={version:1;width:number;height:number;fields:SheetField[]}
 export const emptySheet=():CharacterSheet=>({version:1,width:800,height:1100,fields:[]})
+const MAX_CHOICE_DEPTH = 16
+const MAX_CHOICE_OPTIONS = 12
 export const MAX_SHEET_PAGES = 5
 export const MAX_SHEET_BYTES = 1_000_000
 export const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
 export const sheetPageParts = Array.from({length:MAX_SHEET_PAGES}, (_, index) => `sheet_page_${index}`)
-export type FieldType = SheetField['type'] | 'bar' | 'select' | 'radio' | 'checkbox'
-export type PageField = Omit<SheetField, 'type'> & {type:FieldType; height:number; highlight:boolean; hideLabel:boolean; readOnly?:boolean; maximum:number; options:string[]}
+export type FieldType = SheetField['type'] | 'textarea' | 'bar' | 'select' | 'radio' | 'checkbox'
+export type PageField = Omit<SheetField, 'type'> & {type:FieldType; height:number; highlight:boolean; hideLabel:boolean; readOnly?:boolean; tokenShortcut?:boolean; maximum:number; options:string[]}
 export type SheetPage = {id:string; width:number; height:number; fields:PageField[]; backgroundFile?:string; removeBackground?:boolean}
-type SheetMacro = {
-  fieldId:string
-  event:'clique'|'enter'|'mudanca'
-  action:{kind:'chat'}|{kind:'atribuir';targetId:string}|{kind:'rolar';sides:number}|({kind:'rolar'} & ReturnType<typeof diceGroups>)
-}
-export type PagedSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]}
+type MacroAction = {kind:'chat';text?:string}|{kind:'atribuir';targetId:string}|{kind:'rolar';sides:number}|
+  ({kind:'rolar'} & ReturnType<typeof diceGroups>)|{kind:'escolher';label:string;options:{label:string;action:MacroAction}[]}
+type SheetMacro = { fieldId:string;event:'clique'|'enter'|'mudanca';action:MacroAction }
+export type PagedSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]; techniques?:unknown}
 export type StoredSheet = CharacterSheet | PagedSheet
+
+function countFields(sheet?: StoredSheet) {
+  return sheet?.version === 2 ? sheet.pages.reduce((count, page) => count + page.fields.length, 0) : 0
+}
+
+export function validateSheetFieldLimit(sheet?: StoredSheet, previous?: StoredSheet) {
+  if (countFields(sheet) > Math.max(100, countFields(previous))) {
+    throw new BadRequestException('A ficha aceita até 100 campos. Fichas existentes acima desse limite podem manter os campos já salvos.')
+  }
+}
 
 export function characterSheet(raw:unknown):StoredSheet {
   const fail=():never=>{throw new BadRequestException('Ficha inválida. Confira dimensões, referências únicas e posições dos campos.')}
@@ -48,24 +58,22 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
   const inRange = (value:unknown,min:number,max:number):value is number => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
   const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
   const pageIds = new Set<string>(), fieldIds = new Set<string>(), references = new Set<string>()
-  const types:readonly string[] = ['text','number','bar','select','radio','checkbox']
+  const types:readonly string[] = ['text','textarea','number','bar','select','radio','checkbox']
   if(!Array.isArray(raw)||raw.length<1||raw.length>MAX_SHEET_PAGES)return fail()
-  let fieldCount=0
   const pages = raw.map((page:unknown):SheetPage=>{
     if(!isRecord(page))return fail()
     const {id,width,height,fields,removeBackground}=page
     if(removeBackground!==undefined&&typeof removeBackground!=='boolean')return fail()
     if(typeof id!=='string'||!uuid.test(id)||pageIds.has(id)||!inRange(width,400,1600)||!inRange(height,300,4000)||!Array.isArray(fields)||fields.length>100)return fail()
-    fieldCount+=fields.length
-    if(fieldCount>100)return fail()
     pageIds.add(id)
     return {id,width,height,removeBackground,fields:fields.map((field:unknown):PageField=>{
       if(!isRecord(field))return fail()
-      const {id,label,reference,type,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,readOnly,maximum,options}=field
+      const {id,label,reference,type,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,readOnly,tokenShortcut,maximum,options}=field
       if(typeof id!=='string'||!uuid.test(id)||fieldIds.has(id)||typeof reference!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(reference)||references.has(reference))return fail()
       if(typeof label!=='string'||!label.trim()||label.length>60||typeof type!=='string'||!types.includes(type)||typeof value!=='string'||value.length>1000)return fail()
       if(!inRange(fieldWidth,12,width)||!inRange(fieldHeight,12,height)||!inRange(x,0,width-fieldWidth)||!inRange(y,0,height-fieldHeight))return fail()
       if(typeof highlight!=='boolean'||typeof hideLabel!=='boolean'||(readOnly!==undefined&&typeof readOnly!=='boolean')||!inRange(maximum,1,1000000)||!Number.isInteger(maximum))return fail()
+      if(tokenShortcut!==undefined&&typeof tokenShortcut!=='boolean')return fail()
       if(!Array.isArray(options)||options.length>20||options.some(o=>typeof o!=='string'||!o.trim()||o.trim()!==o||o.length>60)||new Set(options).size!==options.length)return fail()
       if(type==='number'&&value!==''&&!/^-?(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(value))return fail()
       if(type==='bar'&&(!/^\d+$/.test(value)||!inRange(Number(value),0,maximum)))return fail()
@@ -73,13 +81,40 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
       if(type==='checkbox'&&value!=='true'&&value!=='false')return fail()
       fieldIds.add(id)
       references.add(reference)
-      return {id,label:label.trim(),reference,type:type as FieldType,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,...(readOnly===undefined?{}:{readOnly}),maximum,options}
+      return {id,label:label.trim(),reference,type:type as FieldType,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,...(readOnly===undefined?{}:{readOnly}),...(tokenShortcut===undefined?{}:{tokenShortcut}),maximum,options}
     })}
   })
   if(macros===undefined)return {version:2,pages}
   const invalidMacro=():never=>{throw new BadRequestException('Regra da ficha inválida. Confira o campo, o evento e a ação.')}
   if(!Array.isArray(macros)||macros.length>100)return invalidMacro()
   const rules=new Set<string>()
+  function readAction(raw: unknown, fieldId: string, depth = 0): MacroAction {
+    if (!isRecord(raw)) return invalidMacro()
+    const anotherField = (id: string) => fieldIds.has(id) && id !== fieldId
+    if (raw.kind === 'atribuir' && typeof raw.targetId === 'string' && anotherField(raw.targetId)) {
+      return { kind: 'atribuir', targetId: raw.targetId }
+    }
+    if (raw.kind === 'chat') {
+      if (raw.text === undefined) return { kind: 'chat' }
+      if (typeof raw.text === 'string' && raw.text.trim() && raw.text.length <= 2000) return { kind: 'chat', text: raw.text }
+      return invalidMacro()
+    }
+    if (raw.kind === 'rolar' && raw.groups !== undefined) return { kind: 'rolar', ...diceGroups(raw, true, anotherField) }
+    if (raw.kind === 'rolar' && inRange(raw.sides, 2, 1000) && Number.isInteger(raw.sides)) {
+      return { kind: 'rolar', sides: raw.sides }
+    }
+    if (raw.kind !== 'escolher' || depth >= MAX_CHOICE_DEPTH || typeof raw.label !== 'string' || !raw.label.trim() || raw.label.length > 100 ||
+      !Array.isArray(raw.options) || !raw.options.length || raw.options.length > MAX_CHOICE_OPTIONS) return invalidMacro()
+    const labels = new Set<string>()
+    const options = raw.options.map(option => {
+      if (!isRecord(option) || typeof option.label !== 'string' || !option.label.trim() || option.label.length > 100) return invalidMacro()
+      const label = option.label.trim()
+      if (labels.has(label)) return invalidMacro()
+      labels.add(label)
+      return { label, action: readAction(option.action, fieldId, depth + 1) }
+    })
+    return { kind: 'escolher', label: raw.label.trim(), options }
+  }
   const validated=macros.map((rule:unknown):SheetMacro=>{
     if(!isRecord(rule))return invalidMacro()
     const {fieldId,event,action}=rule
@@ -88,15 +123,7 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
     const key=`${fieldId}/${event}`
     if(rules.has(key))return invalidMacro()
     rules.add(key)
-    if(action.kind==='atribuir'&&typeof action.targetId==='string'&&fieldIds.has(action.targetId)&&action.targetId!==fieldId){
-      return {fieldId,event,action:{kind:'atribuir',targetId:action.targetId}}
-    }
-    if(action.kind==='chat')return {fieldId,event,action:{kind:'chat'}}
-    if(action.kind==='rolar'&&action.groups!==undefined)return {fieldId,event,action:{kind:'rolar',...diceGroups(action,true)}}
-    if(action.kind==='rolar'&&inRange(action.sides,2,1000)&&Number.isInteger(action.sides)){
-      return {fieldId,event,action:{kind:'rolar',sides:action.sides}}
-    }
-    return invalidMacro()
+    return { fieldId, event, action: readAction(action, fieldId) }
   })
   return {version:2,pages,macros:validated}
 }
