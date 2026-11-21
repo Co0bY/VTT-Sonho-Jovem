@@ -15,7 +15,7 @@ import { editorHtml } from '../tabletop/rich-text'
 import CharactersPanel from '../components/CharactersPanel.vue'
 import TokenPropertiesDialog from '../components/TokenPropertiesDialog.vue'
 import ImageTransformDialog from '../components/ImageTransformDialog.vue'
-import type { ChatPage, Tabletop, Tool, Token, TokenProperties, Scene, Layer, Rect, Character, CharacterCard, Message } from '../tabletop/types'
+import type { ChatPage, Tabletop, Tool, Token, TokenPropertiesUpdate, Scene, Layer, Rect, Character, CharacterCard, Message } from '../tabletop/types'
 import type { Point } from '../tabletop/geometry'
 const route = useRoute()
 const id = String(route.params.id)
@@ -211,7 +211,7 @@ function openTokenProperties(tokenId: string) {
   error.value = ''
   tokenPropertiesId.value = tokenId
 }
-function saveTokenProperties(tokenId: string, properties: TokenProperties) {
+function saveTokenProperties(tokenId: string, properties: TokenPropertiesUpdate) {
   return action(async () => { await api(`${endpoint}/tokens/${tokenId}/properties`, properties) })
 }
 async function rotateToken(tokenId:string,rotation:number,free:boolean){await action(async()=>{await api(`${endpoint}/tokens/${tokenId}/rotate`,{rotation,free})})}

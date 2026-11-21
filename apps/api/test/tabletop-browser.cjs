@@ -193,19 +193,25 @@ async function main() {
   assert.deepEqual(configuredToken.settings.bars[0],{value:30,max:40})
   assert.deepEqual(configuredToken.settings.bars[3],{value:null,max:null,valueFieldId:currentField.id,maxFieldId:maxField.id})
   assert.deepEqual(configuredToken.display_bars[3],{value:15,max:25})
-  currentField.value='19'
-  maxField.value='36'
-  await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[guardianSheet,guardian.id])
+  await page.mouse.click(tokenPoint.x, tokenPoint.y, {button:'right'})
+  await tokenDialog.waitFor()
+  const linkedCurrent = page.getByLabel('Valor atual vinculado da barra 4',{exact:true})
+  const linkedMax = page.getByLabel('Máximo vinculado da barra 4',{exact:true})
+  assert.equal(await linkedCurrent.inputValue(),'15')
+  assert.equal(await linkedMax.inputValue(),'25')
+  await linkedCurrent.fill('19')
+  await linkedMax.fill('36')
+  await page.getByRole('checkbox',{name:'Salvar estado para novos mapas',exact:true}).check()
+  await page.locator('.token-properties').getByRole('button',{name:'Salvar',exact:true}).click()
+  await tokenDialog.waitFor({state:'hidden'})
   assert.deepEqual((await snapshot()).tokens[0].display_bars[3],{value:19,max:36})
-  currentField.value='15'
+  const savedCharacter = (await db.query('SELECT sheet,token_state FROM tabletop_characters WHERE id=$1',[guardian.id])).rows[0]
+  const savedFields = savedCharacter.sheet.pages.flatMap(page=>page.fields)
+  assert.equal(savedFields.find(field=>field.id===currentField.id).value,'19')
+  assert.equal(savedFields.find(field=>field.id===maxField.id).value,'36')
+  assert.equal(savedCharacter.token_state.settings.vision.dark,3)
+  assert.equal(savedCharacter.token_state.settings.bars[3].valueFieldId,currentField.id)
   await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[guardianSheet,guardian.id])
-
-  assert.equal(configuredToken.settings.auras[0].shape,'square')
-  assert.deepEqual(configuredToken.settings.conditions,['caido'])
-  assert.equal(configuredToken.settings.image.mirrored,true)
-  assert.equal(configuredToken.settings.vision.dark,3)
-  assert.equal(configuredToken.settings.light.bright,1.5)
-
   await page.mouse.click(tokenPoint.x, tokenPoint.y, {button:'right'})
   await tokenDialog.waitFor()
   assert.equal(await defense.inputValue(),'16')

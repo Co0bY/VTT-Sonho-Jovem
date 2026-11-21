@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common'
-import type { StoredSheet } from './character-sheet'
+import type { PageField, SheetField, StoredSheet } from './character-sheet'
 import { integer } from './tabletop-rules'
 
 const conditionIds = new Set(['agarrado', 'assustado', 'atordoado', 'caido', 'cego', 'envenenado', 'inconsciente',
@@ -74,4 +74,29 @@ export function tokenSettings(input: unknown) {
     vision: { ...range(visionData), enabled: boolean(visionData.enabled), dark: distance(visionData.dark) },
     light: range(record(light)),
   }
+}
+
+export function applyLinkedBarUpdates(sheet: StoredSheet, bars: Bar[], raw: unknown): StoredSheet {
+  const entries = Object.entries(record(raw))
+  const linked = new Set(bars.flatMap(bar => [bar.valueFieldId, bar.maxFieldId]))
+  const maximums = new Set(bars.map(bar => bar.maxFieldId))
+  const fields = sheet.version === 2 ? sheet.pages.flatMap(page => page.fields) : sheet.fields
+  const updated = new Map<string, string>()
+  for (const [id, input] of entries) {
+    const field = fields.find(item => item.id === id)
+    if (!field || !linked.has(id)) throw new BadRequestException('O campo precisa estar vinculado a uma barra deste token.')
+    if ('readOnly' in field && field.readOnly) throw new BadRequestException(`${field.label} está em somente leitura.`)
+    const value = input === null ? '' : String(integer(input, maximums.has(id) ? 1 : -2147483648, 2147483647, field.label))
+    if ((field.type === 'bar' && (value === '' || Number(value) < 0 || Number(value) > field.maximum))
+      || ((field.type === 'select' || field.type === 'radio') && value !== '' && !field.options.includes(value))
+      || field.type === 'checkbox') throw new BadRequestException(`O valor é inválido para o campo ${field.label}.`)
+    updated.set(id, value)
+  }
+  function withValue<T extends PageField | SheetField>(field: T): T {
+    const value = updated.get(field.id)
+    return value === undefined ? field : { ...field, value }
+  }
+  return sheet.version === 2
+    ? { ...sheet, pages: sheet.pages.map(page => ({ ...page, fields: page.fields.map(withValue) })) }
+    : { ...sheet, fields: sheet.fields.map(withValue) }
 }

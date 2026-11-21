@@ -1,4 +1,4 @@
-import { resolvedBars, tokenSettings } from './token-settings'
+import { resolvedBars } from './token-settings'
 import { Query, Body, Controller, Get, Post, Param, Req, Res, Injectable, Module, UnauthorizedException, BadRequestException, ForbiddenException, ConflictException, NotFoundException, HttpException, UseInterceptors, UploadedFile, UploadedFiles, StreamableFile } from '@nestjs/common'
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
@@ -516,17 +516,7 @@ class ApiController {
     @Param('id') id: string, @Param('tokenId') tokenId: string, @Body() body: Record<string, unknown>, @Req() req: Request,
   ) {
     this.accounts.mutation(req)
-    const access = await this.tableAccess(id, req)
-    if (!uuid.test(tokenId)) throw new BadRequestException('Token inválido.')
-    const defense = body?.defense === null ? null : integer(body?.defense, -2147483648, 2147483647, 'Defesa')
-    const observation = body?.observation === null ? null : integer(body?.observation, -2147483648, 2147483647, 'Observação')
-    const settings = body?.settings === undefined ? null : tokenSettings(body.settings)
-    const { rows } = await this.db.pool.query(`
-      UPDATE tabletop_tokens SET defense=$1, observation=$2, settings=COALESCE($8,settings)
-      WHERE id=$3 AND campaign_id=$4 AND scene_id=$5 AND ($6::boolean OR (owner_id=$7 AND layer='geral'))
-      RETURNING defense, observation`, [defense, observation, tokenId, id, access.scene.id, access.master, access.user.id, settings])
-    if (!rows.length) throw new ForbiddenException('Você não pode editar as propriedades deste token.')
-    return rows[0]
+    return this.characters.updateTokenProperties(await this.tableAccess(id, req), tokenId, body)
   }
   @Post('campaigns/:id/tabletop/tokens/:tokenId/rotate') async rotateToken(@Param('id') id:string,@Param('tokenId') tokenId:string,@Body() body:Record<string,unknown>,@Req() req:Request){
     this.accounts.mutation(req);const access=await this.tableAccess(id,req)

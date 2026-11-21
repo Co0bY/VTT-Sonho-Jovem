@@ -274,6 +274,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
         );
         CREATE UNIQUE INDEX IF NOT EXISTS tabletop_character_folder_name_unique
           ON tabletop_character_folders(campaign_id,lower(btrim(name)));
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS token_state jsonb;
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS folder_id uuid;
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS visible_to uuid[] NOT NULL DEFAULT '{}';
         DO $$ BEGIN

@@ -2,21 +2,35 @@
 import { computed, ref, watch } from 'vue'
 import FilterSelect from './FilterSelect.vue'
 import { editableTokenSettings, maxTokenBars, newTokenBar, tokenBarColor, tokenConditions } from '../tabletop/token-settings'
-import type { Token, TokenProperties } from '../tabletop/types'
+import type { Token, TokenPropertiesUpdate } from '../tabletop/types'
 
 const props = defineProps<{
   token?: Token
-  fields: { id: string; label: string; reference: string; value: string }[]
+  fields: { id: string; label: string; reference: string; value: string; readOnly?: boolean }[]
   unit: string
   busy: boolean
   error: string
-  save: (tokenId: string, properties: TokenProperties) => Promise<boolean>
+  save: (tokenId: string, properties: TokenPropertiesUpdate) => Promise<boolean>
 }>()
 const emit = defineEmits<{ close: [] }>()
 const defense = ref<number | ''>('')
 const observation = ref<number | ''>('')
 const settings = ref(editableTokenSettings())
 const tab = ref('properties')
+const saveState = ref(false)
+const linkedDraft = ref<Record<string, number | ''>>({})
+const fieldsById = computed(() => new Map(props.fields.map(field => [field.id, field])))
+
+function linkedValue(id: string) {
+  if (Object.hasOwn(linkedDraft.value, id)) return linkedDraft.value[id]!
+  const raw = fieldsById.value.get(id)?.value.trim()
+  const numeric = raw ? Number(raw.replace(',', '.')) : NaN
+  return Number.isInteger(numeric) ? numeric : ''
+}
+function editLinkedValue(id: string, event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.validity.badInput) linkedDraft.value[id] = input.value === '' ? '' : input.valueAsNumber
+}
 const fieldOptions = computed(() => [
   { value: '', label: 'Valor manual' },
   ...props.fields.map(field => ({ value: field.id, label: `${field.label} (${field.reference})` })),
@@ -43,12 +57,20 @@ watch(() => props.token?.id, () => {
   observation.value = props.token?.observation ?? ''
   settings.value = editableTokenSettings(props.token?.settings)
   tab.value = 'properties'
+  saveState.value = false
+  linkedDraft.value = {}
 }, { immediate: true })
 
 async function save() {
   const token = props.token
   if (!token || props.busy) return
+  const linkedIds = new Set(settings.value.bars.flatMap(bar => [bar.valueFieldId, bar.maxFieldId]))
+  const entries = Object.entries(linkedDraft.value)
+    .filter(([id]) => linkedIds.has(id))
+    .map(([id, value]) => [id, value === '' ? null : value])
   const saved = await props.save(token.id, {
+    save_state: saveState.value,
+    ...(entries.length ? { field_updates: Object.fromEntries(entries) } : {}),
     defense: defense.value === '' ? null : defense.value,
     observation: observation.value === '' ? null : observation.value,
     settings: {
@@ -106,6 +128,11 @@ async function save() {
                   <input v-if="!bar[side.field]" v-model.number="bar[side.value]" type="number" step="1"
                     :min="side.value === 'max' ? 1 : -2147483648" max="2147483647"
                     :aria-label="`${side.label} da barra ${index+1}`">
+                  <input v-else type="number" step="1" :min="side.value === 'max' ? 1 : -2147483648" max="2147483647"
+                    :value="linkedValue(bar[side.field]!)" :disabled="busy || !fieldsById.has(bar[side.field]!) || fieldsById.get(bar[side.field]!)?.readOnly"
+                    :aria-label="`${side.label} vinculado da barra ${index+1}`"
+                    @input="editLinkedValue(bar[side.field]!,$event)">
+
                 </div>
               </div>
               <button type="button" class="text-button token-remove-bar" :aria-label="`Remover barra ${index+1}`"
@@ -177,6 +204,9 @@ async function save() {
               </div>
             </fieldset>
           </section>
+          <label class="table-checkbox token-save-state">
+            <input v-model="saveState" type="checkbox" :disabled="busy"> Salvar estado para novos mapas
+          </label>
           <p v-if="error" role="alert" class="token-properties-error">{{ error }}</p>
           <div class="modal-actions">
             <button type="button" class="text-button" :disabled="busy" @click="emit('close')">Cancelar</button>
@@ -201,6 +231,7 @@ async function save() {
 .token-preview { height:100px;display:grid;place-items:center;background:#17111e;border-radius:8px;margin-bottom:12px; }
 .token-preview img { width:90px;height:90px;object-fit:contain; }
 .token-preview > span { width:58px;height:58px;border-radius:50%;display:grid;place-items:center;font-size:22px;font-weight:700; }
+.token-save-state { margin-top:16px; }
 .token-remove-bar { padding:6px 0; }
 .token-properties h2 { margin-top:0; }
 .token-name { display:flex;align-items:center;gap:8px;overflow-wrap:anywhere; }
