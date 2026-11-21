@@ -70,6 +70,64 @@ async function main(){
   {id:randomUUID(),width:800,height:600,fields:[{...defaults,id:randomUUID(),label:'Vida',reference:'vida',type:'bar',tokenShortcut:false,maximum:40,x:0,y:0,width:200,value:'23'}]},
  ]
  const sheetV2={version:2,pages}
+ const modelForm=visibility=>{
+  const data=new FormData()
+  data.set('name','Modelo de teste')
+  data.set('sheet',JSON.stringify(sheetV2))
+  if(visibility!==undefined)data.set('global',visibility)
+  data.set('sheet_page_0',new Blob([image(80,110)],{type:'image/png'}),'fundo.png')
+  return data
+ }
+ await request('modelos-ficha',401,undefined,null)
+ await request('modelos-ficha',400,modelForm('X'))
+ const privateModel=await request('modelos-ficha',201,modelForm())
+ const globalModel=await request('modelos-ficha',201,modelForm('S'))
+ assert.equal(privateModel.global,'N')
+ assert.equal(globalModel.global,'S')
+ const ownModels=await request('modelos-ficha',200)
+ assert.ok(ownModels.some(model=>model.id===privateModel.id))
+ const visibleModels=await request('modelos-ficha',200,undefined,2)
+ assert.ok(!visibleModels.some(model=>model.id===privateModel.id))
+ assert.ok(visibleModels.some(model=>model.id===globalModel.id))
+ const privateLayout=await request(`modelos-ficha/${privateModel.id}`,200)
+ await request(`modelos-ficha/${privateModel.id}`,404,undefined,2)
+ await asset(privateLayout.pages[0].backgroundUrl,404,2)
+ const sharedLayout=await request(`modelos-ficha/${globalModel.id}`,200,undefined,2)
+ assert.equal(sharedLayout.pages[0].fields[0].value,'')
+ assert.equal(sharedLayout.pages[1].fields[0].value,'0')
+ await asset(sharedLayout.pages[0].backgroundUrl,200,2,image(80,110))
+ await asset(sharedLayout.pages[0].backgroundUrl,401,null)
+ const official=visibleModels.find(model=>model.name==='Shounen’s Dream'&&model.author==='Sistema')
+ assert.equal(official?.global,'S')
+ const officialLayout=await request(`modelos-ficha/${official.id}`,200,undefined,2)
+ assert.deepEqual(officialLayout.pages.map(page=>page.fields.length),[27,56,32])
+ assert.equal(officialLayout.macros.length,5)
+ assert.equal(officialLayout.techniques.rows.length,8)
+ const technique=officialLayout.techniques.rows[0]
+ const templateSheet={...officialLayout,pages:officialLayout.pages.map(page=>({
+  ...page,fields:page.fields.map(field=>field.id===technique.name?{...field,value:'Pedra em chamas'}:field),
+ }))}
+ const techniqueModel=new FormData()
+ techniqueModel.append('name','Técnicas reutilizáveis')
+ techniqueModel.append('sheet',JSON.stringify(templateSheet))
+ const libraryCopy=await request('modelos-ficha',201,techniqueModel)
+ const copiedLayout=await request(`modelos-ficha/${libraryCopy.id}`,200)
+ assert.deepEqual(copiedLayout.techniques,officialLayout.techniques)
+ assert.equal(copiedLayout.pages[1].fields.find(field=>field.id===technique.name).value,'')
+ const invalidTechniqueModel=new FormData()
+ invalidTechniqueModel.append('name','Técnica inválida')
+ invalidTechniqueModel.append('sheet',JSON.stringify({...templateSheet,techniques:{
+  ...templateSheet.techniques,rows:[{...technique,level:randomUUID()}],
+ }}))
+ await request('modelos-ficha',400,invalidTechniqueModel)
+ for(const page of officialLayout.pages)await asset(page.backgroundUrl,200,2)
+ const system=(await db.query('SELECT id, email, is_system, password_hash FROM users WHERE email=$1',['sistema@vtt.invalid'])).rows[0]
+ assert.ok(system.is_system)
+ assert.match(system.password_hash,/^[a-f0-9]{32}:[a-f0-9]{128}$/)
+ await request('auth/login',401,{email:system.email,password:'uma-senha-qualquer'},null)
+ await request('auth/register',409,{email:system.email,name:'Sistema'},null)
+ await request('auth/forgot-password',201,{email:system.email},null)
+ assert.equal((await db.query('SELECT 1 FROM password_reset_tokens WHERE user_id=$1',[system.id])).rowCount,0)
  const migration=form('Duas páginas',player)
  migration.append('sheet',JSON.stringify(sheetV2))
  migration.append('sheet_page_1',new Blob([image(80,60)],{type:'image/png'}),'recursos.png')
@@ -87,19 +145,17 @@ async function main(){
   update.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],fields:[{...pages[1].fields[0],...invalid}]}]}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)
  }
- const oversized={...sheetV2,pages:[pages[0],{...pages[1],fields:Array.from({length:100},(_,i)=>({
+ const oversized={...sheetV2,pages:[pages[0],{...pages[1],fields:Array.from({length:120},(_,i)=>({
   ...pages[1].fields[0],id:randomUUID(),reference:`vida_${i}`,
  }))}]}
  const oversizedForm=form('Ficha existente',player)
  oversizedForm.append('sheet',JSON.stringify(oversized))
  await request(`${base}/characters/${empty.id}/settings`,400,oversizedForm,1)
  const stored=(await db.query('SELECT sheet FROM tabletop_characters WHERE id=$1',[empty.id])).rows[0].sheet
- const techniques=[{label:'Técnica existente'}]
- await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[{...oversized,techniques},empty.id])
+ await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[oversized,empty.id])
  const preservedLargeSheet=await request(`${base}/characters/${empty.id}/settings`,201,oversizedForm,1)
- assert.equal(preservedLargeSheet.sheet.pages.flatMap(page=>page.fields).length,101)
+ assert.equal(preservedLargeSheet.sheet.pages.flatMap(page=>page.fields).length,121)
  assert.equal(preservedLargeSheet.sheet.pages[0].fields[0].tokenShortcut,true)
- assert.deepEqual(preservedLargeSheet.sheet.techniques,techniques)
  await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[stored,empty.id])
  const macro={fieldId:pages[1].fields[0].id,event:'clique',action:{kind:'rolar',sides:6}}
  for(const invalid of [[macro,macro],[{...macro,fieldId:randomUUID()}],[{...macro,event:'focus'}],[{...macro,action:{kind:'rolar',sides:1}}]]){

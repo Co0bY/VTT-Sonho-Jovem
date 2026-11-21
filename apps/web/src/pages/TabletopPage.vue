@@ -11,7 +11,7 @@ import CharacterCardDialog from '../components/CharacterCardDialog.vue'
 import { editorHtml } from '../tabletop/rich-text'
 import CharactersPanel from '../components/CharactersPanel.vue'
 import ImageTransformDialog from '../components/ImageTransformDialog.vue'
-import type { Tabletop, Tool, Token, Scene, Layer, Rect, Character, CharacterCard } from '../tabletop/types'
+import type { Tabletop, Tool, Token, Scene, Layer, Rect, Character, CharacterCard, Message } from '../tabletop/types'
 import type { Point } from '../tabletop/geometry'
 const route = useRoute()
 const id = String(route.params.id)
@@ -25,6 +25,7 @@ const presentationQueue:CharacterCard[]=[]
 let presentationCursor:string|undefined
 const compactCharacters=ref(false)
 const characterDialog=ref(false),characterTarget=ref<Character|null>(null)
+const characterEditor = ref<InstanceType<typeof CharacterDialog>>()
 
 const editingLayer=ref<Layer>('geral'),objectName=ref(''),objectFile=ref<File>(),objectInput=ref<HTMLInputElement>()
 const transformTarget=ref<{id:string;name:string;rect:Rect;layer:Layer}|null>(null)
@@ -103,7 +104,10 @@ async function presentCard(characterId:string){
   const ok=await action(async()=>{await api(`${endpoint}/characters/${characterId}/present`,{})})
   if(!ok)presentationError.value=error.value
 }
-function openCharacter(character:Character|null=null){error.value='';characterTarget.value=character;characterDialog.value=true}
+function openCharacter(character:Character|null=null){
+  if (characterEditor.value?.focusSheetWindow()) return
+  error.value='';characterTarget.value=character;characterDialog.value=true
+}
 async function saveCharacter(characterId:string|null,data:FormData){return action(async()=>{await api(characterId?`${endpoint}/characters/${characterId}/settings`:`${endpoint}/characters`,data)})}
 function createCharacterFolder(name: string) {
   return action(async () => { await api(`${endpoint}/character-folders`, { name }) })
@@ -126,7 +130,7 @@ async function resizeToken(tokenId:string,rect:Rect){await action(async()=>{awai
 async function removeToken(tokenId: string) { await action(async () => { await api(`${endpoint}/tokens/${tokenId}/remove`, {}); selected.value = '' }) }
 async function removeObject(objectId:string){return action(async()=>{await api(`${endpoint}/objects/${objectId}/remove`,{});selected.value=''})}
 function removeSelected(targetId:string){if(targetId.startsWith('object:'))void removeObject(targetId.slice(7));else void removeToken(targetId)}
-async function sendMacro(message:MacroMessage){return api(`${endpoint}/messages`,message)}
+async function sendMacro(message:MacroMessage){return api<Pick<Message,'roll'>>(`${endpoint}/messages`,message)}
 async function rollFromToken(roll: { action: Extract<MacroAction, { kind: 'rolar' }>; value: string; fields: { id: string; value: string }[] }) {
   await action(async () => { await sendMacro(macroMessage(roll.action, roll.value, id => roll.fields.find(field => field.id === id)?.value)) })
 }
@@ -173,7 +177,7 @@ onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(
           <div class="scene-controls"><span>{{ tool === 'measure' ? `Arraste entre centros · Alt: livre · 1 célula = ${state.scene.distance_per_cell} ${state.scene.distance_unit}` : tool === 'pan' ? 'Arraste o cenário para navegar' : master && (selected === 'background' || selected.startsWith('object:')) ? 'Cantos: proporção/grid · Alt: livre · Duplo clique: editar · Del: excluir' : 'Selecione um token · Arraste o fundo para navegar' }}</span><div><button aria-label="Diminuir zoom" @click="board?.zoomBy(0.8)">−</button><output aria-label="Zoom atual">{{ zoom }}%</output><button aria-label="Aumentar zoom" @click="board?.zoomBy(1.25)">+</button><button aria-label="Ajustar cenário à tela" title="Ajustar cenário à tela" @click="board?.center()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 12h10m-5-5v10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div></div>
         </section>
         <aside v-if="sidebar" class="table-panel"><nav class="panel-tabs" aria-label="Painéis da mesa"><button v-for="tab in tabs.filter(tab=>master || tab.id!=='layers')" :key="tab.id" :class="{ active: panel === tab.id }" :aria-pressed="panel === tab.id" :aria-label="tab.label" @click="panel = tab.id"><span>{{ tab.icon }}</span>{{ tab.label }}</button></nav>
-          <template v-if="panel === 'chat'"><div class="panel-heading"><h2>Chat da mesa</h2><span>HISTÓRICO COMPARTILHADO</span></div><div ref="chatList" class="chat-messages" role="log" aria-label="Mensagens da mesa" aria-live="polite"><div class="chat-welcome"><span>✦</span><strong>A história começa aqui</strong><p>Converse com seu grupo ou deixe os dados decidirem.</p></div><article v-for="message in state.messages" :key="message.id" class="chat-message" :class="{ 'own-message': message.user_id === state.user.id }"><header><strong>{{ message.author }}</strong><time :datetime="message.created_at">{{ new Date(message.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }}</time></header><div v-if="message.roll" class="dice-result"><span>ROLAGEM · {{ message.roll.expression }}</span><template v-if="'groups' in message.roll">
+          <template v-if="panel === 'chat'"><div class="panel-heading"><h2>Chat da mesa</h2><span>HISTÓRICO COMPARTILHADO</span></div><div ref="chatList" class="chat-messages" role="log" aria-label="Mensagens da mesa" aria-live="polite"><div class="chat-welcome"><span>✦</span><strong>A história começa aqui</strong><p>Converse com seu grupo ou deixe os dados decidirem.</p></div><article v-for="message in state.messages" :key="message.id" class="chat-message" :class="{ 'own-message': message.user_id === state.user.id }"><header><strong>{{ message.author }}</strong><time :datetime="message.created_at">{{ new Date(message.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }}</time></header><p v-if="!message.roll || !/^\/(?:roll|r)\s/i.test(message.content)">{{ message.content }}</p><div v-if="message.roll" class="dice-result"><span>ROLAGEM · {{ message.roll.expression }}</span><template v-if="'groups' in message.roll">
             <div v-for="(group,groupIndex) in message.roll.groups" :key="groupIndex" class="dice-group-result">
               <span>{{ group.expression }}<template v-if="group.success"> · Sucesso {{ group.success.min }}–{{ group.success.max }}</template><template v-else-if="group.reduction && group.reduction!=='sucesso'"> · {{ reductions[group.reduction] }}</template></span>
               <div class="dice-values"><b v-for="(value,index) in group.rolls" :key="index">{{ value }}</b></div>
@@ -190,7 +194,7 @@ onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(
         </aside>
       </div><footer class="table-status"><span><i></i>{{ busy ? 'Salvando…' : error || networkError ? 'Falha de atualização' : 'Alterações salvas no servidor' }}</span><span>Protótipo · atualização a cada 2 s <b>✦ SONHO JOVEM</b></span></footer>
     <CharacterCardDialog :card="presentationCard" :master="master" :busy="busy" :error="presentationError" @close="closeCard" @present="presentCard" />
-    <CharacterDialog :master="master" :read-only="sharedCharacter" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
+    <CharacterDialog ref="characterEditor" :master="master" :read-only="sharedCharacter" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
     <ImageTransformDialog :scene="state.scene" :target="transformTarget" :busy="busy" :error="error" :save="transformImage" :remove="removeObject" @close="transformTarget = null" /></template>
   </div>
 </template>

@@ -6,6 +6,7 @@ export const emptySheet=():CharacterSheet=>({version:1,width:800,height:1100,fie
 const MAX_CHOICE_DEPTH = 16
 const MAX_CHOICE_OPTIONS = 12
 export const MAX_SHEET_PAGES = 5
+const MAX_SHEET_FIELDS = 120
 export const MAX_SHEET_BYTES = 1_000_000
 export const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
 export const sheetPageParts = Array.from({length:MAX_SHEET_PAGES}, (_, index) => `sheet_page_${index}`)
@@ -15,7 +16,10 @@ export type SheetPage = {id:string; width:number; height:number; fields:PageFiel
 type MacroAction = {kind:'chat';text?:string}|{kind:'atribuir';targetId:string}|{kind:'rolar';sides:number}|
   ({kind:'rolar'} & ReturnType<typeof diceGroups>)|{kind:'escolher';label:string;options:{label:string;action:MacroAction}[]}
 type SheetMacro = { fieldId:string;event:'clique'|'enter'|'mudanca';action:MacroAction }
-export type PagedSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]; techniques?:unknown}
+const techniqueFields = ['name', 'level', 'element', 'cost', 'range', 'effect', 'attribute'] as const
+type Technique = Record<typeof techniqueFields[number], string>
+type Techniques = { attributes: Record<string,string>; rows: Technique[] }
+export type PagedSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]; techniques?:Techniques}
 export type StoredSheet = CharacterSheet | PagedSheet
 
 function countFields(sheet?: StoredSheet) {
@@ -23,8 +27,8 @@ function countFields(sheet?: StoredSheet) {
 }
 
 export function validateSheetFieldLimit(sheet?: StoredSheet, previous?: StoredSheet) {
-  if (countFields(sheet) > Math.max(100, countFields(previous))) {
-    throw new BadRequestException('A ficha aceita até 100 campos. Fichas existentes acima desse limite podem manter os campos já salvos.')
+  if (countFields(sheet) > Math.max(MAX_SHEET_FIELDS, countFields(previous))) {
+    throw new BadRequestException('A ficha aceita até 120 campos. Fichas existentes acima desse limite podem manter os campos já salvos.')
   }
 }
 
@@ -36,7 +40,7 @@ export function characterSheet(raw:unknown):StoredSheet {
   if(!data||typeof data!=='object'||Array.isArray(data))return fail()
   const sheet=data as Record<string,unknown>
   const number=(value:unknown,min:number,max:number):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>=min&&value<=max
-  if(sheet.version===2)return pagedSheet(sheet.pages, sheet.macros, fail)
+  if(sheet.version===2)return pagedSheet(sheet.pages, sheet.macros, sheet.techniques, fail)
   if(sheet.version!==1||!number(sheet.width,400,1600)||!number(sheet.height,300,4000)||!Array.isArray(sheet.fields)||sheet.fields.length>100)return fail()
   const ids=new Set<string>(),references=new Set<string>()
   const fields:SheetField[]=sheet.fields.map((raw:unknown)=>{
@@ -53,7 +57,7 @@ export function characterSheet(raw:unknown):StoredSheet {
   return {version:1,width:sheet.width as number,height:sheet.height as number,fields}
 }
 
-function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
+function pagedSheet(raw:unknown, macros:unknown, rawTechniques:unknown, fail:()=>never):PagedSheet {
   const isRecord = (value:unknown):value is Record<string,unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
   const inRange = (value:unknown,min:number,max:number):value is number => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
   const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
@@ -64,7 +68,7 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
     if(!isRecord(page))return fail()
     const {id,width,height,fields,removeBackground}=page
     if(removeBackground!==undefined&&typeof removeBackground!=='boolean')return fail()
-    if(typeof id!=='string'||!uuid.test(id)||pageIds.has(id)||!inRange(width,400,1600)||!inRange(height,300,4000)||!Array.isArray(fields)||fields.length>100)return fail()
+    if(typeof id!=='string'||!uuid.test(id)||pageIds.has(id)||!inRange(width,400,1600)||!inRange(height,300,4000)||!Array.isArray(fields)||fields.length>MAX_SHEET_FIELDS)return fail()
     pageIds.add(id)
     return {id,width,height,removeBackground,fields:fields.map((field:unknown):PageField=>{
       if(!isRecord(field))return fail()
@@ -84,7 +88,24 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
       return {id,label:label.trim(),reference,type:type as FieldType,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,...(readOnly===undefined?{}:{readOnly}),...(tokenShortcut===undefined?{}:{tokenShortcut}),maximum,options}
     })}
   })
-  if(macros===undefined)return {version:2,pages}
+  let techniques:Techniques|undefined
+  if(rawTechniques!==undefined){
+    if(!isRecord(rawTechniques)||!isRecord(rawTechniques.attributes)||!Array.isArray(rawTechniques.rows)||rawTechniques.rows.length>fieldIds.size)return fail()
+    const attributes=Object.entries(rawTechniques.attributes)
+    if(!attributes.length||attributes.length>20||attributes.some(([label,id])=>!label.trim()||label.length>60||typeof id!=='string'||!fieldIds.has(id)))return fail()
+    const rows=rawTechniques.rows.map((row:unknown):Technique=>{
+      if(!isRecord(row))return fail()
+      const entries=techniqueFields.map(key=>[key,row[key]] as const)
+      const ids=entries.map(([,id])=>id)
+      if(ids.some(id=>typeof id!=='string'||!fieldIds.has(id))||new Set(ids).size!==ids.length)return fail()
+      if(!pages.some(page=>ids.every(id=>page.fields.some(field=>field.id===id))))return fail()
+      return Object.fromEntries(entries) as Technique
+    })
+    if(!rows.length||new Set(rows.map(row=>row.attribute)).size!==rows.length||new Set(rows.map(row=>row.cost)).size!==rows.length)return fail()
+    techniques={attributes:Object.fromEntries(attributes) as Record<string,string>,rows}
+  }
+  const layout={version:2 as const,pages,...(techniques?{techniques}:{})}
+  if(macros===undefined)return layout
   const invalidMacro=():never=>{throw new BadRequestException('Regra da ficha inválida. Confira o campo, o evento e a ação.')}
   if(!Array.isArray(macros)||macros.length>100)return invalidMacro()
   const rules=new Set<string>()
@@ -125,5 +146,5 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
     rules.add(key)
     return { fieldId, event, action: readAction(action, fieldId) }
   })
-  return {version:2,pages,macros:validated}
+  return {...layout,macros:validated}
 }

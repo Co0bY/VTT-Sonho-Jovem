@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnApplicationShutdown } from '@nestjs/common'
 import { Pool } from 'pg'
+import { seedShounensDreamSheet } from './shounens-dream-sheet'
 
 @Injectable()
 export class Database implements OnModuleInit, OnApplicationShutdown {
@@ -18,6 +19,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
           id uuid PRIMARY KEY, name varchar(80) NOT NULL, email varchar(254) UNIQUE NOT NULL,
           password_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
         );
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS is_system boolean NOT NULL DEFAULT false;
         CREATE TABLE IF NOT EXISTS sessions (
           token_hash text PRIMARY KEY, user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           expires_at timestamptz NOT NULL
@@ -284,6 +286,21 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS sheet_background_file text;
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS description_format text NOT NULL DEFAULT 'plain' CHECK(description_format IN ('plain','html'));
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS notes_format text NOT NULL DEFAULT 'plain' CHECK(notes_format IN ('plain','html'));
+        DO $$ BEGIN
+          IF to_regtype('modelo_ficha_global') IS NULL THEN
+            CREATE TYPE modelo_ficha_global AS ENUM ('S', 'N');
+          END IF;
+        END $$;
+        CREATE TABLE IF NOT EXISTS modelos_ficha (
+          id uuid PRIMARY KEY,
+          owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name varchar(80) NOT NULL CHECK(length(btrim(name))>0),
+          global modelo_ficha_global NOT NULL DEFAULT 'N',
+          sheet jsonb NOT NULL CHECK(jsonb_typeof(sheet)='object'),
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS modelos_ficha_owner_idx ON modelos_ficha(owner_id, name);
+        CREATE INDEX IF NOT EXISTS modelos_ficha_global_idx ON modelos_ficha(name) WHERE global='S';
         CREATE TABLE IF NOT EXISTS tabletop_presence (
           campaign_id uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
           user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -324,6 +341,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
         DROP TRIGGER IF EXISTS tabletop_token_character ON tabletop_tokens;
         CREATE TRIGGER tabletop_token_character BEFORE INSERT ON tabletop_tokens FOR EACH ROW EXECUTE FUNCTION initialize_token_character();
       `)
+      await seedShounensDreamSheet(client)
       await client.query('COMMIT')
     } catch (error) { await client.query('ROLLBACK'); throw error }
     finally { client.release() }
