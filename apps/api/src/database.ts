@@ -190,6 +190,9 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
       await client.query(`
         ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS width integer NOT NULL DEFAULT 3200 CHECK(width BETWEEN 128 AND 16384);
         ALTER TABLE tabletop_scenes ADD COLUMN IF NOT EXISTS height integer NOT NULL DEFAULT 2200 CHECK(height BETWEEN 128 AND 16384);
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'::jsonb;
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS defense integer;
+        ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS observation integer;
         ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS rotation double precision NOT NULL DEFAULT 0 CHECK(rotation>=0 AND rotation<360);
         ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS width double precision CHECK(width BETWEEN 8 AND 16384);
         ALTER TABLE tabletop_tokens ADD COLUMN IF NOT EXISTS height double precision CHECK(height BETWEEN 8 AND 16384);
@@ -271,6 +274,7 @@ export class Database implements OnModuleInit, OnApplicationShutdown {
         );
         CREATE UNIQUE INDEX IF NOT EXISTS tabletop_character_folder_name_unique
           ON tabletop_character_folders(campaign_id,lower(btrim(name)));
+        ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS token_state jsonb;
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS folder_id uuid;
         ALTER TABLE tabletop_characters ADD COLUMN IF NOT EXISTS visible_to uuid[] NOT NULL DEFAULT '{}';
         DO $$ BEGIN

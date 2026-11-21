@@ -337,7 +337,18 @@ async function main(){
  await request(`${base}/characters/${privateCharacter.id}/place`,201,{x:100,y:100,layer:'mestre'})
  await asset(privateCharacter.token_url,404,1)
  assert.ok(!(await request(base,200,undefined,1)).tokens.some(t=>t.character_id===privateCharacter.id))
- await request(`${base}/characters/${privateCharacter.id}/place`,201,{x:200,y:100,layer:'geral'})
+ const privatePresence=await request(`${base}/characters/${privateCharacter.id}/place`,201,{x:200,y:100,layer:'geral'})
+ const privateProperties=`${base}/tokens/${privatePresence.id}/properties`
+ assert.deepEqual(await request(privateProperties,201,{defense:15,observation:12}),{defense:15,observation:12})
+ await request(privateProperties,403,{defense:99,observation:0},1)
+ await request(privateProperties,400,{defense:15.5,observation:12})
+ await request(privateProperties,400,{defense:15,observation:12,settings:{conditions:['inventada']}})
+ const playerToken=(await request(base,200,undefined,1)).tokens.find(token=>token.id===privatePresence.id)
+ assert.equal(playerToken.defense,null)
+ assert.equal(playerToken.observation,null)
+ const savedToken=(await request(base,200)).tokens.find(token=>token.id===privatePresence.id)
+ assert.equal(savedToken.defense,15)
+ assert.equal(savedToken.observation,12)
  await asset(privateCharacter.token_url,200,1,tokenImage)
  const beforeFiles=(await readdir(join(directory,'outros'))).sort()
  await request(`${base}/characters`,400,form('Inválido',owner,portrait,Buffer.from('imagem inválida')))
@@ -351,6 +362,13 @@ async function main(){
  assert.ok((await request(base,200)).characters.some(c=>c.id===hero.id),'Excluir cenário preserva personagem')
  const legacy=await request(`${base}/tokens`,201,{name:'Token anterior',owner_id:player,color:'#aa55ee',x:100,y:100})
  assert.equal(legacy.character_id,legacy.id)
+ const legacyProperties=`${base}/tokens/${legacy.id}/properties`
+ assert.deepEqual(await request(legacyProperties,201,{defense:0,observation:9},1),{defense:0,observation:9})
+ assert.deepEqual(await request(legacyProperties,201,{defense:null,observation:9},1),{defense:null,observation:9})
+ const playerPresence=(await request(base,200,undefined,1)).tokens.find(token=>token.id===legacy.id)
+ assert.equal(playerPresence.defense,null)
+ assert.equal(playerPresence.observation,9)
+
  assert.ok((await request(base,200)).characters.some(c=>c.id===legacy.character_id))
  await request(`${base}/tokens/${legacy.id}/remove`,201,{})
  assert.ok((await request(base,200)).characters.some(c=>c.id===legacy.character_id))
@@ -393,6 +411,23 @@ async function main(){
  assert.ok(guest.tokens.some(t=>t.character_id===privateCharacter.id))
  await asset(shared.sheet_background_url,404,1)
  assert.ok((await request(base,200)).characters.some(c=>c.id===privateCharacter.id),'Mestre sempre vê a ficha.')
+ const profileSettings={
+  bars:[{value:8,max:12}],auras:[{radius:0,shape:'circle',color:'#7444aa',opacity:35},{radius:0,shape:'circle',color:'#7444aa',opacity:35}],
+  conditions:[],image:{opacity:100,mirrored:false},vision:{enabled:true,bright:12,dim:6,dark:3,angle:120},
+  light:{bright:2,dim:4,angle:360},
+ }
+ await request(privateProperties,403,{defense:15,observation:12,settings:profileSettings,save_state:true},1)
+ await request(privateProperties,400,{defense:15,observation:12,settings:profileSettings,field_updates:{[randomUUID()]:9}})
+ await request(privateProperties,201,{defense:15,observation:12,settings:profileSettings,save_state:true})
+ const destination=await request(`${base}/scenes`,201,{name:'Mapa com estado salvo'})
+ await request(`${base}/scenes/${destination.id}/activate`,201,{})
+ const copied=await request(`${base}/characters/${privateCharacter.id}/place`,201,{x:128,y:128})
+ assert.notEqual(copied.id,privatePresence.id)
+ assert.equal(copied.scene_id,destination.id)
+ assert.equal(copied.defense,15)
+ assert.deepEqual(copied.settings,profileSettings)
+ const withoutProfile=await request(`${base}/characters/${hero.id}/place`,201,{x:200,y:200})
+ assert.deepEqual(withoutProfile.settings,{})
  const missing=await db.query('SELECT t.id FROM tabletop_tokens t LEFT JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND c.id IS NULL',[campaign])
  assert.equal(missing.rowCount,0)
  console.log('PASS personagens independentes de cenários, imagens distintas, múltiplas presenças, edição sincronizada, permissões, sigilo de imagens, upload/limpeza, cenários vazios, compatibilidade de tokens anteriores, pastas e visibilidade independente do mapa.')

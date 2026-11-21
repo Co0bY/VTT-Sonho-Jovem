@@ -1,3 +1,4 @@
+import { resolvedBars } from './token-settings'
 import { Query, Body, Controller, Get, Post, Param, Req, Res, Injectable, Module, UnauthorizedException, BadRequestException, ForbiddenException, ConflictException, NotFoundException, HttpException, UseInterceptors, UploadedFile, UploadedFiles, StreamableFile } from '@nestjs/common'
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
@@ -233,7 +234,14 @@ class ApiController {
     const cursor = this.messageCursor(after)
     const [sceneList, tokens, chat, members, objects, folders, characters, characterFolders] = await Promise.all([
       this.db.pool.query('SELECT * FROM tabletop_scenes WHERE campaign_id=$1 AND ($2::boolean OR id=$3) ORDER BY created_at,id', [id, access.master, access.scene.id]),
-      this.db.pool.query("SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.width,t.height,t.rotation,t.layer,c.token_file FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND t.scene_id=$2 AND ($3::boolean OR t.layer<>'mestre') ORDER BY t.created_at,t.id", [id,access.scene.id,access.master]),
+      this.db.pool.query(`SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.width,t.height,t.rotation,t.layer,c.token_file,t.settings,
+        CASE WHEN jsonb_path_exists(t.settings,'$.bars[*] ? (exists(@.valueFieldId) || exists(@.maxFieldId))')
+          THEN c.sheet END AS bar_sheet,
+        CASE WHEN $3::boolean OR (t.owner_id=$4 AND t.layer='geral') THEN t.defense END AS defense,
+        CASE WHEN $3::boolean OR (t.owner_id=$4 AND t.layer='geral') THEN t.observation END AS observation
+        FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id
+        WHERE t.campaign_id=$1 AND t.scene_id=$2 AND ($3::boolean OR t.layer<>'mestre')
+        ORDER BY t.created_at,t.id`, [id,access.scene.id,access.master,access.user.id]),
       cursor === null ? this.chatPage(id) : this.db.pool.query(`
         SELECT m.id::text,m.content,m.roll,m.created_at,u.name AS author,u.id AS user_id
         FROM tabletop_messages m JOIN users u ON u.id=m.user_id
@@ -248,7 +256,17 @@ class ApiController {
         AND ($2::boolean OR EXISTS(SELECT 1 FROM tabletop_characters c WHERE c.folder_id=f.id
         AND (c.owner_id=$3 OR $3=ANY(c.visible_to)))) ORDER BY lower(f.name),f.id`,[id,access.master,access.user.id]),
     ])
-    return { characters:characters.rows.map(character=>this.characters.present(character, { editable: access.master || character.owner_id === access.user.id, master: access.master })), character_folders:characterFolders.rows, folders:folders.rows, campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: tokens.rows.map(({token_file,...token})=>({...token,token_url:token_file?`/api/campaigns/${id}/tabletop/characters/${token.character_id}/images/token/${token_file}`:null})), objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), ...chat, members: members.rows }
+    const visibleTokens = tokens.rows.map(({ token_file, bar_sheet, settings, ...token }) => {
+      const bars = resolvedBars(settings.bars ?? [], bar_sheet)
+      const editable = access.master || (token.owner_id === access.user.id && token.layer === 'geral')
+      return {
+        ...token,
+        settings: editable ? settings : { ...settings, bars },
+        display_bars: bars,
+        token_url: token_file ? `/api/campaigns/${id}/tabletop/characters/${token.character_id}/images/token/${token_file}` : null,
+      }
+    })
+    return { characters:characters.rows.map(character=>this.characters.present(character, { editable: access.master || character.owner_id === access.user.id, master: access.master })), character_folders:characterFolders.rows, folders:folders.rows, campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: visibleTokens, objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), ...chat, members: members.rows }
   }
   @Post('campaigns/:id/tabletop/settings') async tableSettings(@Param('id') id: string, @Body() body: Record<string, unknown>, @Req() req: Request) {
     this.accounts.mutation(req)
@@ -493,6 +511,12 @@ class ApiController {
     const coords = position(body.x, body.y, access.scene.cell_size, access.scene.snap,access.scene.width,access.scene.height,access.scene.grid_type)
     const size=access.scene.grid_type==='none'?null:access.scene.cell_size
     return (await this.db.pool.query('INSERT INTO tabletop_tokens(id,campaign_id,owner_id,name,color,x,y,scene_id,layer,width,height) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) RETURNING *', [randomUUID(), id, owner, name, color, coords.x, coords.y, access.scene.id, targetLayer,size])).rows[0]
+  }
+  @Post('campaigns/:id/tabletop/tokens/:tokenId/properties') async tokenProperties(
+    @Param('id') id: string, @Param('tokenId') tokenId: string, @Body() body: Record<string, unknown>, @Req() req: Request,
+  ) {
+    this.accounts.mutation(req)
+    return this.characters.updateTokenProperties(await this.tableAccess(id, req), tokenId, body)
   }
   @Post('campaigns/:id/tabletop/tokens/:tokenId/rotate') async rotateToken(@Param('id') id:string,@Param('tokenId') tokenId:string,@Body() body:Record<string,unknown>,@Req() req:Request){
     this.accounts.mutation(req);const access=await this.tableAccess(id,req)

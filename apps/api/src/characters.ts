@@ -7,7 +7,8 @@ import { Storage } from './storage'
 import { layer } from './layers'
 import { imageSize } from 'image-size'
 import { minimumTokenSize } from './grid'
-import { position } from './tabletop-rules'
+import { applyLinkedBarUpdates, tokenSettings } from './token-settings'
+import { integer, position } from './tabletop-rules'
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export type CharacterRow={id:string;campaign_id:string;owner_id:string;folder_id:string|null;visible_to:string[];name:string;color:string;description:string;notes:string;sheet:StoredSheet;sheet_background_file:string|null;description_format:'plain'|'html';notes_format:'plain'|'html';appearance_file:string|null;token_file:string|null}
@@ -161,6 +162,57 @@ export class Characters {
     return minimumTokenSize({width,height},access.scene.cell_size,access.scene.grid_type)
   }
 
+  async updateTokenProperties(access: CharacterContext, tokenId: string, body: Record<string, unknown>) {
+    if (!uuid.test(tokenId)) throw new BadRequestException('Token inválido.')
+    const defense = body?.defense === null ? null : integer(body?.defense, -2147483648, 2147483647, 'Defesa')
+    const observation = body?.observation === null ? null : integer(body?.observation, -2147483648, 2147483647, 'Observação')
+    const settings = body?.settings === undefined ? null : tokenSettings(body.settings)
+    if (body?.save_state !== undefined && typeof body.save_state !== 'boolean') {
+      throw new BadRequestException('Opção de salvar estado inválida.')
+    }
+
+    const campaign = access.campaign.id
+    const scope = [tokenId, campaign, access.scene.id, access.master, access.user.id]
+    const permitted = "id=$1 AND campaign_id=$2 AND scene_id=$3 AND ($4::boolean OR (owner_id=$5 AND layer='geral'))"
+    const forbidden = () => new ForbiddenException('Você não pode editar as propriedades deste token.')
+    const client = await this.db.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const { rows: [identity] } = await client.query(`SELECT character_id FROM tabletop_tokens WHERE ${permitted}`, scope)
+      if (!identity) throw forbidden()
+      // Character edits lock the sheet before updating its tokens. Keep the same order here.
+      const { rows: [character] } = await client.query(
+        'SELECT sheet FROM tabletop_characters WHERE id=$1 AND campaign_id=$2 FOR UPDATE', [identity.character_id, campaign],
+      )
+      const { rows: [token] } = await client.query(
+        `SELECT settings FROM tabletop_tokens WHERE ${permitted} AND character_id=$6 FOR UPDATE`, [...scope, identity.character_id],
+      )
+      if (!character || !token) throw forbidden()
+
+      const updatedSettings = settings ?? token.settings
+      if (body.field_updates !== undefined) {
+        const sheet = applyLinkedBarUpdates(character.sheet, updatedSettings.bars ?? [], body.field_updates)
+        await client.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2 AND campaign_id=$3',
+          [sheet, identity.character_id, campaign])
+      }
+      const { rows: [saved] } = await client.query(
+        'UPDATE tabletop_tokens SET defense=$1, observation=$2, settings=$3 WHERE id=$4 RETURNING defense, observation',
+        [defense, observation, updatedSettings, tokenId],
+      )
+      if (body.save_state === true) {
+        await client.query('UPDATE tabletop_characters SET token_state=$1 WHERE id=$2 AND campaign_id=$3',
+          [{ defense, observation, settings: updatedSettings }, identity.character_id, campaign])
+      }
+      await client.query('COMMIT')
+      return saved
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
   async place(access:CharacterContext,id:string,body:Record<string,unknown>){
     if(!access.master)throw new ForbiddenException('Somente o mestre pode adicionar personagens ao mapa.')
     const character=await this.find(access.campaign.id,id)
@@ -172,7 +224,12 @@ export class Characters {
       const current=(await client.query('SELECT * FROM tabletop_characters WHERE id=$1 AND campaign_id=$2 FOR SHARE',[character.id,access.campaign.id])).rows[0]
       if(!current)throw new NotFoundException('Personagem não encontrado.')
       const size=await this.mapSize(access,{width:null,height:null,token_file:current.token_file})
-      const token=(await client.query('INSERT INTO tabletop_tokens(id,campaign_id,scene_id,character_id,owner_id,name,color,x,y,layer,width,height) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',[randomUUID(),access.campaign.id,access.scene.id,current.id,current.owner_id,current.name,current.color,coords.x,coords.y,targetLayer,size.width,size.height])).rows[0]
+      const profile = current.token_state
+      const token = (await client.query(`
+        INSERT INTO tabletop_tokens(id,campaign_id,scene_id,character_id,owner_id,name,color,x,y,layer,width,height,defense,observation,settings)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [randomUUID(),access.campaign.id,access.scene.id,current.id,current.owner_id,current.name,current.color,
+        coords.x,coords.y,targetLayer,size.width,size.height,profile?.defense??null,profile?.observation??null,profile?.settings??{}])).rows[0]
       await client.query('COMMIT');return token
     }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
 
