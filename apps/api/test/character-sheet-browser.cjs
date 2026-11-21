@@ -339,8 +339,46 @@ async function main(){
 
 
 
+ await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
+ await page.getByRole('tab',{name:'Configurações da ficha',exact:true}).click()
+ const attackRule=page.locator('.macro-rule').first()
+ await chooseOption(attackRule.getByLabel('Ação da regra 1',{exact:true}),'escolher')
+ for(let depth=0;depth<5;depth++){
+  const node=attackRule.locator('.macro-choice').nth(depth)
+  await node.getByLabel('Título do seletor',{exact:true}).first().fill(`Etapa ${depth+1}`)
+  const branch=node.locator(':scope > .macro-choice-branches > .macro-choice-branch').first()
+  await branch.getByLabel('Nome da opção',{exact:true}).first().fill('Avançar')
+  if(depth<4)await chooseOption(branch.getByLabel('Ação da opção',{exact:true}).first(),'escolher')
+  else {
+   await chooseOption(branch.getByLabel('Origem da quantidade da rolagem 1',{exact:true}),'input')
+   await chooseOption(branch.getByLabel('Input da quantidade da rolagem 1',{exact:true}),'other')
+   await chooseOption(branch.getByLabel('Campo da quantidade da rolagem 1',{exact:true}),bar.id)
+  }
+ }
+ const alternate=attackRule.locator('.macro-choice').first().locator(':scope > .macro-choice-branches > .macro-choice-branch').nth(1)
+ await alternate.getByLabel('Nome da opção',{exact:true}).fill('Alternativa')
+ await alternate.getByLabel('Mensagem para o chat',{exact:true}).fill('Caminho alternativo')
+ await page.getByRole('button',{name:'Editor de texto',exact:true}).click()
+ const workflowText=await groupedCode.inputValue()
+ assert.match(workflowText,/escolher .*Etapa 5/)
+ assert.ok(workflowText.includes(`rolar d6 de ${bar.reference}`))
+ await groupedCode.fill(workflowText.replace(`rolar d6 de ${bar.reference}`,`rolar d4 de ${bar.reference}`))
+ await page.getByRole('button',{name:'Blocos',exact:true}).click()
+ assert.equal(await attackRule.locator('.macro-choice').last().getByLabel('Faces da regra 1',{exact:true}).inputValue(),'4')
+ await page.getByRole('button',{name:'Salvar personagem',exact:true}).click()
+ await page.getByRole('heading',{name:'Editar personagem',exact:true}).waitFor({state:'hidden'})
+ await page.getByRole('button',{name:'Editar personagem Força de teste',exact:true}).click()
+ await page.getByRole('tab',{name:'Ficha',exact:true}).click()
+ await field.click()
+ await chooseOption(page.getByRole('combobox',{name:'Etapa 1',exact:true}),'1')
+ await page.getByText('Ação enviada ao chat da mesa.',{exact:true}).waitFor()
+ assert.equal((await request('')).messages.at(-1).content,'Caminho alternativo')
+ await field.click()
+ for(let depth=1;depth<=5;depth++)await chooseOption(page.getByRole('combobox',{name:`Etapa ${depth}`,exact:true}),'0')
+ await page.getByText('Ação enviada ao chat da mesa.',{exact:true}).waitFor()
+ assert.equal((await request('')).messages.at(-1).roll.expression,'40d4')
  assert.deepEqual(errors,[])
- console.log('PASS ficha no navegador: duas páginas, fundos independentes, gesto de arraste, redimensionamento, aparência, novos tipos, recuperação após falha ao salvar, sincronização de macros e execução no chat.')
+ console.log('PASS ficha no navegador: duas páginas, fundos independentes, gesto de arraste, redimensionamento, aparência, novos tipos, recuperação após falha ao salvar, sincronização de macros, cinco escolhas encadeadas e execução no chat.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
  if(browser)await browser.close()

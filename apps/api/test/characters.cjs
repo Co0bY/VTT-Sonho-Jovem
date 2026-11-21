@@ -107,6 +107,16 @@ async function main(){
   update.append('sheet',JSON.stringify({...sheetV2,macros:invalid}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)
  }
+ const leaf={kind:'rolar',groups:[{count:null,countFieldId:pages[0].fields[0].id,sides:8,reduction:'somar'}],combine:null}
+ const nested=(depth,action=leaf)=>depth===0?action:{kind:'escolher',label:`Seletor ${depth}`,options:[
+  {label:'Avançar',action:nested(depth-1,action)},{label:'Encerrar',action:{kind:'chat',text:'Fim'}},
+ ]}
+ for(const [action,status] of [[nested(5),201],[nested(17),400],[nested(1,{...leaf,groups:[{...leaf.groups[0],countFieldId:macro.fieldId}] }),400]]){
+  const flowForm=form('Macro com escolhas',player)
+  flowForm.append('sheet',JSON.stringify({...sheetV2,macros:[{...macro,action}]}))
+  const result=await request(`${base}/characters/${empty.id}/settings`,status,flowForm,1)
+  if(status===201)assert.deepEqual(result.sheet.macros[0].action,action)
+ }
  const groups=[{count:3,sides:6,reduction:'subtrair'},{count:2,sides:8,reduction:'multiplicar'},{count:2,sides:20,reduction:'somar'}]
  await request(`${base}/messages`,201,{content:'/roll 3d6, 2d8, 2d20',dice:{groups,combine:null}},1)
  const separate=(await request(base,200,undefined,1)).messages.at(-1).roll

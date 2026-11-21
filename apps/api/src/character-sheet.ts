@@ -3,6 +3,8 @@ import { diceGroups } from './tabletop-rules'
 export type SheetField={id:string;label:string;reference:string;type:'text'|'number';x:number;y:number;width:number;value:string}
 export type CharacterSheet={version:1;width:number;height:number;fields:SheetField[]}
 export const emptySheet=():CharacterSheet=>({version:1,width:800,height:1100,fields:[]})
+const MAX_CHOICE_DEPTH = 16
+const MAX_CHOICE_OPTIONS = 12
 export const MAX_SHEET_PAGES = 5
 export const MAX_SHEET_BYTES = 1_000_000
 export const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
@@ -10,11 +12,9 @@ export const sheetPageParts = Array.from({length:MAX_SHEET_PAGES}, (_, index) =>
 export type FieldType = SheetField['type'] | 'textarea' | 'bar' | 'select' | 'radio' | 'checkbox'
 export type PageField = Omit<SheetField, 'type'> & {type:FieldType; height:number; highlight:boolean; hideLabel:boolean; readOnly?:boolean; tokenShortcut?:boolean; maximum:number; options:string[]}
 export type SheetPage = {id:string; width:number; height:number; fields:PageField[]; backgroundFile?:string; removeBackground?:boolean}
-type SheetMacro = {
-  fieldId:string
-  event:'clique'|'enter'|'mudanca'
-  action:{kind:'chat'}|{kind:'atribuir';targetId:string}|{kind:'rolar';sides:number}|({kind:'rolar'} & ReturnType<typeof diceGroups>)
-}
+type MacroAction = {kind:'chat';text?:string}|{kind:'atribuir';targetId:string}|{kind:'rolar';sides:number}|
+  ({kind:'rolar'} & ReturnType<typeof diceGroups>)|{kind:'escolher';label:string;options:{label:string;action:MacroAction}[]}
+type SheetMacro = { fieldId:string;event:'clique'|'enter'|'mudanca';action:MacroAction }
 export type PagedSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]; techniques?:unknown}
 export type StoredSheet = CharacterSheet | PagedSheet
 
@@ -88,6 +88,33 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
   const invalidMacro=():never=>{throw new BadRequestException('Regra da ficha inválida. Confira o campo, o evento e a ação.')}
   if(!Array.isArray(macros)||macros.length>100)return invalidMacro()
   const rules=new Set<string>()
+  function readAction(raw: unknown, fieldId: string, depth = 0): MacroAction {
+    if (!isRecord(raw)) return invalidMacro()
+    const anotherField = (id: string) => fieldIds.has(id) && id !== fieldId
+    if (raw.kind === 'atribuir' && typeof raw.targetId === 'string' && anotherField(raw.targetId)) {
+      return { kind: 'atribuir', targetId: raw.targetId }
+    }
+    if (raw.kind === 'chat') {
+      if (raw.text === undefined) return { kind: 'chat' }
+      if (typeof raw.text === 'string' && raw.text.trim() && raw.text.length <= 2000) return { kind: 'chat', text: raw.text }
+      return invalidMacro()
+    }
+    if (raw.kind === 'rolar' && raw.groups !== undefined) return { kind: 'rolar', ...diceGroups(raw, true, anotherField) }
+    if (raw.kind === 'rolar' && inRange(raw.sides, 2, 1000) && Number.isInteger(raw.sides)) {
+      return { kind: 'rolar', sides: raw.sides }
+    }
+    if (raw.kind !== 'escolher' || depth >= MAX_CHOICE_DEPTH || typeof raw.label !== 'string' || !raw.label.trim() || raw.label.length > 100 ||
+      !Array.isArray(raw.options) || !raw.options.length || raw.options.length > MAX_CHOICE_OPTIONS) return invalidMacro()
+    const labels = new Set<string>()
+    const options = raw.options.map(option => {
+      if (!isRecord(option) || typeof option.label !== 'string' || !option.label.trim() || option.label.length > 100) return invalidMacro()
+      const label = option.label.trim()
+      if (labels.has(label)) return invalidMacro()
+      labels.add(label)
+      return { label, action: readAction(option.action, fieldId, depth + 1) }
+    })
+    return { kind: 'escolher', label: raw.label.trim(), options }
+  }
   const validated=macros.map((rule:unknown):SheetMacro=>{
     if(!isRecord(rule))return invalidMacro()
     const {fieldId,event,action}=rule
@@ -96,15 +123,7 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
     const key=`${fieldId}/${event}`
     if(rules.has(key))return invalidMacro()
     rules.add(key)
-    if(action.kind==='atribuir'&&typeof action.targetId==='string'&&fieldIds.has(action.targetId)&&action.targetId!==fieldId){
-      return {fieldId,event,action:{kind:'atribuir',targetId:action.targetId}}
-    }
-    if(action.kind==='chat')return {fieldId,event,action:{kind:'chat'}}
-    if(action.kind==='rolar'&&action.groups!==undefined)return {fieldId,event,action:{kind:'rolar',...diceGroups(action,true)}}
-    if(action.kind==='rolar'&&inRange(action.sides,2,1000)&&Number.isInteger(action.sides)){
-      return {fieldId,event,action:{kind:'rolar',sides:action.sides}}
-    }
-    return invalidMacro()
+    return { fieldId, event, action: readAction(action, fieldId) }
   })
   return {version:2,pages,macros:validated}
 }

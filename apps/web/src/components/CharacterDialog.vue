@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import FilterSelect from './FilterSelect.vue'
+import MacroChoicePrompt from './MacroChoicePrompt.vue'
 import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue'
 import CharacterSheetMacros from './CharacterSheetMacros.vue'
-import { macroMessage, type MacroEvent, type MacroMessage } from '../tabletop/sheet-macros'
+import { macroMessage, type ChoiceAction, type MacroEvent, type MacroMessage, type TerminalAction } from '../tabletop/sheet-macros'
 import CharacterSheetEditor from './CharacterSheetEditor.vue'
 import { editableSheet, fieldValueError, sheetError } from '../tabletop/character-sheet'
 import CharacterTextEditor from './CharacterTextEditor.vue'
@@ -23,15 +24,39 @@ const savedMacros=computed(()=>{
   return saved?.version===2?saved.macros??[]:[]
 })
 const clickMacros=computed(()=>new Set(savedMacros.value.filter(rule=>rule.event==='clique').map(rule=>rule.fieldId)))
+const clickChoices = computed(() => new Set(savedMacros.value.filter(rule => rule.event === 'clique' && rule.action.kind === 'escolher').map(rule => rule.fieldId)))
 const macroStatus=ref('')
-async function runMacro(fieldId:string,event:MacroEvent,value:string){
+const choicePath = ref<ChoiceAction[]>([])
+const currentChoice = computed(() => choicePath.value.at(-1))
+let choiceValue = ''
+
+function cancelChoice() { choicePath.value = [] }
+function goBackChoice() { choicePath.value.pop() }
+function chooseOption(index: string) {
+  const action = currentChoice.value?.options[Number(index)]?.action
+  if (!action) return
+  if (action.kind === 'escolher') choicePath.value.push(action)
+  else {
+    cancelChoice()
+    void runAction(action, choiceValue)
+  }
+}
+
+function runMacro(fieldId:string,event:MacroEvent,value:string){
   const rule=savedMacros.value.find(rule=>rule.fieldId===fieldId&&rule.event===event)
-  if(!rule)return
+  if(!rule || props.readOnly || currentChoice.value)return
   macroStatus.value=''
   localError.value=''
+  if (rule.action.kind === 'escolher') {
+    choiceValue = value
+    choicePath.value = [rule.action]
+  } else void runAction(rule.action, value)
+}
+
+async function runAction(action: TerminalAction, value: string) {
   try{
-    if(rule.action.kind==='atribuir'){
-      const targetId=rule.action.targetId
+    if(action.kind==='atribuir'){
+      const targetId=action.targetId
       const target=macroFields.value.find(field=>field.id===targetId)
       if(!target)return
       const error=fieldValueError(target,value)
@@ -42,7 +67,7 @@ async function runMacro(fieldId:string,event:MacroEvent,value:string){
       })}
       return
     }
-    await props.sendMacro(macroMessage(rule.action,value))
+    await props.sendMacro(macroMessage(action,value,id=>macroFields.value.find(field=>field.id===id)?.value))
     macroStatus.value='Ação enviada ao chat da mesa.'
   }catch(error){
     localError.value=(error as Error).message
@@ -159,6 +184,7 @@ watch(()=>[props.open,props.character?.id],()=>{
   closeSheetWindow()
   releasePages()
   macroStatus.value=''
+  cancelChoice()
   if(!props.open){for(const kind of kinds){release(kind);uploads[kind]=null};return}
   visibleTo.value = [...(props.character?.visible_to ?? [])]
   sheet.value=editableSheet(props.character?.sheet,props.character?.sheet_background_url)
@@ -243,7 +269,16 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
         <section v-show="sheetWindowTarget || tab === 'sheet'" aria-label="Ficha"
           :role="sheetWindowTarget ? undefined : 'tabpanel'" :class="{ 'sheet-window': sheetWindowTarget }">
           <h1 v-if="sheetWindowTarget">{{ name.trim() || 'Ficha do personagem' }}</h1>
-          <CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :read-only="readOnly" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
+          <div :inert="!!sheetWindowTarget && !!currentChoice">
+          <CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :click-choices="clickChoices" :read-only="readOnly" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
+          </div>
+          <div v-if="sheetWindowTarget && currentChoice" class="detached-macro-choice" role="dialog"
+            :aria-label="currentChoice.label" aria-modal="true" @keydown.esc.stop="cancelChoice">
+            <div class="modal q-card">
+              <MacroChoicePrompt :key="choicePath.length" :choice="currentChoice" :can-go-back="choicePath.length>1"
+                @choose="chooseOption" @back="goBackChoice" @cancel="cancelChoice" />
+            </div>
+          </div>
           <p v-if="macroStatus" role="status">{{ macroStatus }}</p>
           <p v-if="sheetWindowTarget && (localError || error)" role="alert" class="character-error">{{ localError || error }}</p>
         </section>
@@ -260,8 +295,16 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
       <div class="modal-actions"><button type="button" class="text-button" :disabled="busy" @click="emit('close')">{{ readOnly ? 'Fechar' : 'Cancelar' }}</button><button v-if="!readOnly" class="primary" :disabled="busy">{{ character ? 'Salvar personagem' : 'Criar personagem' }}</button></div>
     </form>
   </q-card-section></q-card></q-dialog>
+  <q-dialog :model-value="!!currentChoice && !sheetWindowTarget" @update:model-value="value=>!value && !sheetWindowTarget && cancelChoice()">
+    <q-card v-if="currentChoice" class="modal" :aria-label="currentChoice.label"><q-card-section>
+      <MacroChoicePrompt :key="choicePath.length" :choice="currentChoice" :can-go-back="choicePath.length>1"
+        @choose="chooseOption" @back="goBackChoice" @cancel="cancelChoice" />
+    </q-card-section></q-card>
+  </q-dialog>
 </template>
 <style scoped>
+.detached-macro-choice { position:fixed;inset:0;display:grid;place-items:center;z-index:8100;background:#100a17c9; }
+.detached-macro-choice > .modal { padding:22px; }
 .character-readonly { display:grid;gap:12px; }
 .character-readonly img { max-width:180px;max-height:220px;object-fit:contain;border-radius:8px; }
 .character-dialog-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }

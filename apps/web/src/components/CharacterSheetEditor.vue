@@ -3,10 +3,10 @@ import FilterSelect from './FilterSelect.vue'
 import { selectOptions } from '../tabletop/select-options'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { CharacterSheet, FieldType, SheetField, SheetPage } from '../tabletop/character-sheet'
-import type { MacroEvent } from '../tabletop/sheet-macros'
+import { usesMacroField, type MacroEvent } from '../tabletop/sheet-macros'
 import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
 
-const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;readOnly?:boolean;clickMacros:ReadonlySet<string>}>()
+const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;readOnly?:boolean;clickMacros:ReadonlySet<string>;clickChoices?:ReadonlySet<string>}>()
 const emit=defineEmits<{
   'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string];trigger:[fieldId:string,event:MacroEvent,value:string]
 }>()
@@ -140,7 +140,7 @@ function removeField(){
   emit('update:modelValue',{
     ...props.modelValue,
     pages:props.modelValue.pages.map(item=>item.id===page.value.id?{...item,fields:item.fields.filter(field=>field.id!==selectedId.value)}:item),
-    macros:props.modelValue.macros?.filter(rule=>rule.fieldId!==selectedId.value&&(rule.action.kind!=='atribuir'||rule.action.targetId!==selectedId.value)),
+    macros:props.modelValue.macros?.filter(rule=>rule.fieldId!==selectedId.value&&!usesMacroField(rule.action,selectedId.value)),
   })
   selectedId.value=''
 }
@@ -287,7 +287,8 @@ defineExpose({finishEditing})
             :class="{selected:editing && selectedId===field.id,highlight:field.highlight}"
             :data-sheet-field="field.id" :title="editing ? field.label : undefined" :style="{left:`${field.x}px`,top:`${field.y}px`,width:`${field.width}px`,height:`${field.height}px`,'--field-font':`${clamp(field.height-3,9,14)}px`}">
             <div class="field-content" :inert="editing && !(editingValue && selectedId===field.id)" @keydown.esc="stopValueEditing"
-              @keydown.enter="trigger(field,$event,'enter')" @change="trigger(field,$event,'mudanca')">
+              @keydown.enter="trigger(field,$event,'enter')" @change="trigger(field,$event,'mudanca')"
+              @click="!editing && !disabled && !readOnly && clickChoices?.has(field.id) && emit('trigger',field.id,'clique',field.value)">
               <span v-if="!field.hideLabel && field.type==='radio'" class="field-label">{{ field.label }}</span>
               <label v-else-if="!field.hideLabel" class="field-label" :for="`sheet-value-${field.id}`">{{ field.label }}</label>
               <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"

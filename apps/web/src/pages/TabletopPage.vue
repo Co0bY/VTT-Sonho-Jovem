@@ -40,7 +40,7 @@ const tokenRolls = computed(() => {
   return (sheet.macros ?? []).flatMap(rule => {
     if (rule.event !== 'clique' || rule.action.kind !== 'rolar') return []
     const field = fields.find(field => field.id === rule.fieldId)
-    return field?.tokenShortcut === true ? [{ id: field.id, label: field.label || field.reference, value: field.value, action: rule.action }] : []
+    return field?.tokenShortcut === true ? [{ id: field.id, label: field.label || field.reference, value: field.value, action: rule.action, fields }] : []
   })
 })
 const loginLink = `/?retorno=${encodeURIComponent(`/mesas/${id}`)}`
@@ -127,8 +127,8 @@ async function removeToken(tokenId: string) { await action(async () => { await a
 async function removeObject(objectId:string){return action(async()=>{await api(`${endpoint}/objects/${objectId}/remove`,{});selected.value=''})}
 function removeSelected(targetId:string){if(targetId.startsWith('object:'))void removeObject(targetId.slice(7));else void removeToken(targetId)}
 async function sendMacro(message:MacroMessage){return api(`${endpoint}/messages`,message)}
-async function rollFromToken(roll: { action: Extract<MacroAction, { kind: 'rolar' }>; value: string }) {
-  await action(async () => { await sendMacro(macroMessage(roll.action, roll.value)) })
+async function rollFromToken(roll: { action: Extract<MacroAction, { kind: 'rolar' }>; value: string; fields: { id: string; value: string }[] }) {
+  await action(async () => { await sendMacro(macroMessage(roll.action, roll.value, id => roll.fields.find(field => field.id === id)?.value)) })
 }
 async function send(content = draft.value) { if (!content.trim()) return; await action(async () => { await api(`${endpoint}/messages`, { content }); if (content === draft.value) draft.value = ''; await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) }) }
 async function createScene(settings: object) {
