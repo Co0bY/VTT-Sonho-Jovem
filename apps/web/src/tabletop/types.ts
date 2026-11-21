@@ -9,7 +9,8 @@ export type SceneFolder = {id:string;name:string}
 export type Scene = { folder_id:string|null; id: string; name: string; distance_per_cell: number; distance_unit: string; background_url: string | null; background_transform: Rect | null; cell_size: number; grid_type: 'square' | 'hex' | 'none'; grid_visible: boolean; grid_color: string; grid_opacity: number; snap: boolean; width: number; height: number }
 export type Member = { id: string; name: string; role: string }
 export type Message = { id: string; content: string; author: string; user_id: string; created_at: string; roll: null | { expression: string; rolls: number[]; modifier: number; total: number } | { expression:string; groups:{expression:string;rolls:number[];reduction:Reduction|'sucesso'|null;total:number|null;success?:{min:number;max:number;hits:number;misses:number}}[];combine:Reduction|null;total:number|null } }
-export type Tabletop = { campaign: { id: string; name: string; system: string; description: string }; user: { id: string; name: string }; role: string; characters:Character[]; folders:SceneFolder[]; scene: Scene; scenes: Scene[]; tokens: Token[]; objects: SceneObject[]; messages: Message[]; members: Member[] }
+export type ChatPage = { messages: Message[]; hasOlderMessages: boolean }
+export type Tabletop = { campaign: { id: string; name: string; system: string; description: string }; user: { id: string; name: string }; role: string; characters:Character[]; folders:SceneFolder[]; scene: Scene; scenes: Scene[]; tokens: Token[]; objects: SceneObject[]; messages: Message[]; hasOlderMessages?: boolean; members: Member[] }
 export type Tool = 'select' | 'pan' | 'measure'
 
 export type CharacterCard = Pick<Character,'id'|'name'|'color'|'appearance_url'|'token_url'> & {description:string}

@@ -125,3 +125,7 @@ A aba Ficha oferece fundos independentes por página, campos transparentes com d
 ## Atualização — macros da ficha
 
 Configurações da ficha oferece edição sincronizada em blocos e texto para associar campos a clique, Enter e modificação. Regras publicam o valor como texto ou usam o valor como quantidade de dados no chat da mesa. Consulte `34-macros-da-ficha.md`.
+
+## Atualização — dados 3D, som e paginação do chat
+
+A entrega foi retomada na branch `feat/dados-3d-e-som`, a partir do commit `b7bd6cc`, e está em revisão no [PR #8](https://github.com/Co0bY/VTT-Sonho-Jovem/pull/8). O chat abre com até 50 mensagens recentes, no fim da lista. Subir ao topo carrega páginas anteriores de até 50 mensagens, mantendo a posição de leitura. Novas rolagens acionam o Canvas e o som conforme a preferência do navegador. Consulte `38-dados-3d-e-som.md` para uso, decisões e validações.

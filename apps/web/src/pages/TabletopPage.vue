@@ -12,7 +12,7 @@ import CharacterCardDialog from '../components/CharacterCardDialog.vue'
 import { editorHtml } from '../tabletop/rich-text'
 import CharactersPanel from '../components/CharactersPanel.vue'
 import ImageTransformDialog from '../components/ImageTransformDialog.vue'
-import type { Tabletop, Tool, Token, Scene, Layer, Rect, Character, CharacterCard } from '../tabletop/types'
+import type { ChatPage, Tabletop, Tool, Token, Scene, Layer, Rect, Character, CharacterCard } from '../tabletop/types'
 import type { Point } from '../tabletop/geometry'
 const route = useRoute()
 const id = String(route.params.id)
@@ -21,6 +21,8 @@ const state = ref<Tabletop>(), loading = ref(true), busy = ref(false), error = r
 const tool = ref<Tool>('select'), selected = ref(''), zoom = ref(100), panel = ref('chat'), sidebar = ref(true)
 const board = ref<InstanceType<typeof TabletopBoard>>(), chatList = ref<HTMLElement>()
 const draft = ref('')
+const hasOlderMessages = ref(false), loadingOlderMessages = ref(false), historyError = ref(false)
+
 const presentationCard=ref<CharacterCard|null>(null),presentationError=ref('')
 const presentationQueue:CharacterCard[]=[]
 let presentationCursor:string|undefined
@@ -60,23 +62,70 @@ function nextDiceBatch(){
   activeDice.value=diceQueue.shift()
   if(activeDice.value&&!diceMuted.value)diceSound.play(activeDice.value.dice.length)
 }
+function scrollChatToEnd() {
+  const element = chatList.value
+  if (element) element.scrollTop = element.scrollHeight
+}
+
+async function loadOlderMessages() {
+  const first = state.value?.messages[0]
+  if (!first || !hasOlderMessages.value || loadingOlderMessages.value) return
+  loadingOlderMessages.value = true
+  historyError.value = false
+  try {
+    const history = await api<ChatPage>(`${endpoint}/messages?before=${first.id}`)
+    if (disposed || !state.value) return
+    const element = chatList.value
+    const anchor = element?.querySelector('.chat-message')
+    const top = anchor?.getBoundingClientRect().top
+    state.value.messages = [...history.messages, ...state.value.messages]
+    hasOlderMessages.value = history.hasOlderMessages
+    await nextTick()
+    if (element && element === chatList.value && anchor && top !== undefined) {
+      element.scrollTop += anchor.getBoundingClientRect().top - top
+    }
+  } catch (e) {
+    if (disposed) return
+    if (e instanceof ApiError && [401, 403].includes(e.status)) report(e)
+    else historyError.value = true
+  } finally {
+    loadingOlderMessages.value = false
+  }
+}
+
+function onChatScroll(event: Event) {
+  if ((event.currentTarget as HTMLElement).scrollTop <= 24 && !historyError.value) {
+    void loadOlderMessages()
+  }
+}
+
 async function refresh() {
   const requested = revision
-  const data = await api<Tabletop>(endpoint)
+  const previous = state.value?.messages
+  const cursor = previous?.at(-1)?.id ?? '0'
+  const data = await api<Tabletop>(previous ? `${endpoint}?after=${cursor}` : endpoint)
   if (disposed || requested !== revision) return
   const element = chatList.value
   const shouldScroll = !state.value || !element || element.scrollHeight - element.scrollTop - element.clientHeight < 90
   if (state.value?.scene.id && state.value.scene.id !== data.scene.id) {selected.value='';transformTarget.value=null}
-  diceQueue.push(...newDiceBatches(state.value?.messages,data.messages))
+  diceQueue.push(...newDiceBatches(previous, data.messages))
+  if (previous && state.value) {
+    data.messages = data.messages.length ? [...state.value.messages, ...data.messages] : state.value.messages
+  } else {
+    hasOlderMessages.value = data.hasOlderMessages ?? false
+  }
   if(!activeDice.value)nextDiceBatch()
   state.value = data
+  if (shouldScroll && element) {
+    await nextTick()
+    if (element === chatList.value) scrollChatToEnd()
+  }
   const presentations=await api<{cursor:string;events:{id:string;card:CharacterCard}[]}>(`${endpoint}/presentations${presentationCursor===undefined?'':`?after=${presentationCursor}`}`)
   if(disposed||requested!==revision)return
   presentationCursor=presentations.cursor
   if(!master.value){for(const event of presentations.events)presentationQueue.push(event.card);if(!presentationCard.value&&presentationQueue.length)presentationCard.value=presentationQueue.shift()!}
   if(selected.value && selected.value!=='background'&&!data.tokens.some(t=>t.id===selected.value)&&!data.objects.some(object=>`object:${object.id}`===selected.value))selected.value=''
   if(transformTarget.value&&transformTarget.value.id!=='background'&&!data.objects.some(object=>object.id===transformTarget.value!.id))transformTarget.value=null
-  if (shouldScroll) { await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) }
 }
 async function poll() {
   if (disposed || accessDenied.value) return
@@ -116,7 +165,14 @@ async function removeToken(tokenId: string) { await action(async () => { await a
 async function removeObject(objectId:string){return action(async()=>{await api(`${endpoint}/objects/${objectId}/remove`,{});selected.value=''})}
 function removeSelected(targetId:string){if(targetId.startsWith('object:'))void removeObject(targetId.slice(7));else void removeToken(targetId)}
 async function sendMacro(message:MacroMessage){return api(`${endpoint}/messages`,message)}
-async function send(content = draft.value) { if (!content.trim()) return; await action(async () => { await api(`${endpoint}/messages`, { content }); if (content === draft.value) draft.value = ''; await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) }) }
+async function send(content = draft.value) {
+  if (!content.trim()) return
+  const sent = await action(async () => {
+    await api(`${endpoint}/messages`, { content })
+    if (content === draft.value) draft.value = ''
+  })
+  if (sent) scrollChatToEnd()
+}
 async function createScene(settings: object) {
   let created: Scene | undefined
   const ok = await action(async () => { created = await api<Scene>(`${endpoint}/scenes`, settings) })
@@ -134,7 +190,7 @@ function editImage(targetId:string,rect:Rect){const object=state.value?.objects.
 async function transformImage(targetId:string,rect:Rect,targetLayer:Layer=editingLayer.value,sceneSize?:{width:number;height:number;cell_size:number}){return action(async()=>{const path=targetId==='background'?`${endpoint}/scenes/${state.value!.scene.id}/background/transform`:`${endpoint}/objects/${targetId}/transform`;await api(path,{...rect,...(targetId==='background'?{}:{layer:targetLayer}),...(sceneSize?{scene_width:sceneSize.width,scene_height:sceneSize.height,scene_cell_size:sceneSize.cell_size}:{})})})}
 async function addImage(){if(!objectFile.value)return;await action(async()=>{const data=new FormData();data.append('name',objectName.value);data.append('layer',editingLayer.value);data.append('image',objectFile.value!);await api(`${endpoint}/objects`,data);objectName.value='';objectFile.value=undefined;if(objectInput.value)objectInput.value.value=''})}
 watch(editingLayer,()=>{selected.value='';tool.value='select'},{flush:'sync'})
-watch(panel, async () => { if (panel.value === 'chat') { await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) } })
+watch(chatList, scrollChatToEnd, { flush: 'post' })
 onMounted(async () => {
   window.addEventListener('pointerdown',unlockDiceSound)
   window.addEventListener('keydown',unlockDiceSound)
@@ -162,7 +218,9 @@ onBeforeUnmount(() => {
           <div class="scene-controls"><span>{{ tool === 'measure' ? `Arraste entre centros · Alt: livre · 1 célula = ${state.scene.distance_per_cell} ${state.scene.distance_unit}` : tool === 'pan' ? 'Arraste o cenário para navegar' : master && (selected === 'background' || selected.startsWith('object:')) ? 'Cantos: proporção/grid · Alt: livre · Duplo clique: editar · Del: excluir' : 'Selecione um token · Arraste o fundo para navegar' }}</span><div><button aria-label="Diminuir zoom" @click="board?.zoomBy(0.8)">−</button><output aria-label="Zoom atual">{{ zoom }}%</output><button aria-label="Aumentar zoom" @click="board?.zoomBy(1.25)">+</button><button aria-label="Ajustar cenário à tela" title="Ajustar cenário à tela" @click="board?.center()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 12h10m-5-5v10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div></div>
         </section>
         <aside v-if="sidebar" class="table-panel"><nav class="panel-tabs" aria-label="Painéis da mesa"><button v-for="tab in tabs.filter(tab=>master || tab.id!=='layers')" :key="tab.id" :class="{ active: panel === tab.id }" :aria-pressed="panel === tab.id" :aria-label="tab.label" @click="panel = tab.id"><span>{{ tab.icon }}</span>{{ tab.label }}</button></nav>
-          <template v-if="panel === 'chat'"><div class="panel-heading"><h2>Chat da mesa</h2><span>HISTÓRICO COMPARTILHADO</span></div><div ref="chatList" class="chat-messages" role="log" aria-label="Mensagens da mesa" aria-live="polite"><div class="chat-welcome"><span>✦</span><strong>A história começa aqui</strong><p>Converse com seu grupo ou deixe os dados decidirem.</p></div><article v-for="message in state.messages" :key="message.id" class="chat-message" :class="{ 'own-message': message.user_id === state.user.id }"><header><strong>{{ message.author }}</strong><time :datetime="message.created_at">{{ new Date(message.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }}</time></header><div v-if="message.roll" class="dice-result"><span>ROLAGEM · {{ message.roll.expression }}</span><template v-if="'groups' in message.roll">
+          <template v-if="panel === 'chat'"><div class="panel-heading"><h2>Chat da mesa</h2><span>HISTÓRICO COMPARTILHADO</span></div><div ref="chatList" class="chat-messages" role="log" aria-label="Mensagens da mesa" aria-live="polite" @scroll.passive="onChatScroll">
+          <button v-if="hasOlderMessages" type="button" class="table-button chat-history-button" :disabled="loadingOlderMessages" @click="loadOlderMessages">{{ loadingOlderMessages ? 'Carregando…' : historyError ? 'Tentar carregar novamente' : 'Carregar mensagens anteriores' }}</button>
+          <div v-else class="chat-welcome"><span>✦</span><strong>A história começa aqui</strong><p>Converse com seu grupo ou deixe os dados decidirem.</p></div><article v-for="message in state.messages" :key="message.id" class="chat-message" :class="{ 'own-message': message.user_id === state.user.id }"><header><strong>{{ message.author }}</strong><time :datetime="message.created_at">{{ new Date(message.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }}</time></header><div v-if="message.roll" class="dice-result"><span>ROLAGEM · {{ message.roll.expression }}</span><template v-if="'groups' in message.roll">
             <div v-for="(group,groupIndex) in message.roll.groups" :key="groupIndex" class="dice-group-result">
               <span>{{ group.expression }}<template v-if="group.success"> · Sucesso {{ group.success.min }}–{{ group.success.max }}</template><template v-else-if="group.reduction && group.reduction!=='sucesso'"> · {{ reductions[group.reduction] }}</template></span>
               <div class="dice-values"><b v-for="(value,index) in group.rolls" :key="index">{{ value }}</b></div>

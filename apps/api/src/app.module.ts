@@ -173,21 +173,51 @@ class ApiController {
     if (!rows[0]) throw new ForbiddenException('Você não participa desta mesa.')
     return { user, campaign: rows[0], master: rows[0].owner_id === user.id, scene: await this.scenes.active(id) }
   }
-  @Get('campaigns/:id/tabletop') async tabletop(@Param('id') id: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  private messageCursor(value: unknown) {
+    if (value === undefined) return null
+    if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,18})$/.test(value) || BigInt(value) > 9223372036854775807n) {
+      throw new BadRequestException('Cursor de mensagens inválido.')
+    }
+    return value
+  }
+
+  private async chatPage(id: string, before: string | null = null) {
+    const { rows } = await this.db.pool.query(`
+      SELECT m.id::text,m.content,m.roll,m.created_at,u.name AS author,u.id AS user_id
+      FROM tabletop_messages m JOIN users u ON u.id=m.user_id
+      WHERE m.campaign_id=$1 AND ($2::bigint IS NULL OR m.id<$2)
+      ORDER BY m.id DESC LIMIT 51`, [id, before])
+    return { messages: rows.slice(0, 50).reverse(), hasOlderMessages: rows.length > 50 }
+  }
+
+  @Get('campaigns/:id/tabletop/messages') async olderMessages(
+    @Param('id') id: string, @Query('before') before: unknown, @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    res.setHeader('Cache-Control', 'no-store')
+    await this.tableAccess(id, req)
+    return this.chatPage(id, this.messageCursor(before))
+  }
+
+  @Get('campaigns/:id/tabletop') async tabletop(@Param('id') id: string, @Query('after') after: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     res.setHeader('Cache-Control', 'no-store')
     const access = await this.tableAccess(id, req)
-    const [sceneList, tokens, messages, members, objects, folders, characters] = await Promise.all([
+    const cursor = this.messageCursor(after)
+    const [sceneList, tokens, chat, members, objects, folders, characters] = await Promise.all([
       this.db.pool.query('SELECT * FROM tabletop_scenes WHERE campaign_id=$1 AND ($2::boolean OR id=$3) ORDER BY created_at,id', [id, access.master, access.scene.id]),
       this.db.pool.query("SELECT t.id,t.character_id,t.owner_id,t.name,t.color,t.x,t.y,t.width,t.height,t.rotation,t.layer,c.token_file FROM tabletop_tokens t JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND t.scene_id=$2 AND ($3::boolean OR t.layer<>'mestre') ORDER BY t.created_at,t.id", [id,access.scene.id,access.master]),
-      this.db.pool.query(`SELECT * FROM (SELECT m.id::text,m.content,m.roll,m.created_at,u.name AS author,u.id AS user_id FROM tabletop_messages m
-        JOIN users u ON u.id=m.user_id WHERE m.campaign_id=$1 ORDER BY m.id DESC LIMIT 100) latest ORDER BY created_at,id::bigint`, [id]),
+      cursor === null ? this.chatPage(id) : this.db.pool.query(`
+        SELECT m.id::text,m.content,m.roll,m.created_at,u.name AS author,u.id AS user_id
+        FROM tabletop_messages m JOIN users u ON u.id=m.user_id
+        WHERE m.campaign_id=$1 AND m.id>$2 ORDER BY m.id`, [id, cursor])
+        .then(({ rows }) => ({ messages: rows })),
       this.db.pool.query(`SELECT u.id,u.name,CASE WHEN u.id=$2 THEN 'mestre' ELSE 'jogador' END AS role FROM users u
         WHERE u.id=$2 OR EXISTS(SELECT 1 FROM campaign_members m WHERE m.campaign_id=$1 AND m.user_id=u.id) ORDER BY u.name`, [id, access.campaign.owner_id]),
       this.db.pool.query("SELECT id,name,layer,x,y,width,height,rotation FROM tabletop_objects WHERE campaign_id=$1 AND scene_id=$2 AND ($3::boolean OR layer<>'mestre') ORDER BY created_at,id",[id,access.scene.id,access.master]),
       this.db.pool.query('SELECT id,name FROM tabletop_scene_folders WHERE campaign_id=$1 AND $2::boolean ORDER BY lower(name),id',[id,access.master]),
       this.db.pool.query('SELECT * FROM tabletop_characters WHERE campaign_id=$1 AND ($2::boolean OR owner_id=$3) ORDER BY created_at,id',[id,access.master,access.user.id]),
     ])
-    return { characters:characters.rows.map(character=>this.characters.present(character)), folders:folders.rows, campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: tokens.rows.map(({token_file,...token})=>({...token,token_url:token_file?`/api/campaigns/${id}/tabletop/characters/${token.character_id}/images/token/${token_file}`:null})), objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), messages: messages.rows, members: members.rows }
+    return { characters:characters.rows.map(character=>this.characters.present(character)), folders:folders.rows, campaign: access.campaign, user: access.user, role: access.master ? 'mestre' : 'jogador', scene: this.scenes.present(access.scene), scenes: sceneList.rows.map(scene => this.scenes.present(scene)), tokens: tokens.rows.map(({token_file,...token})=>({...token,token_url:token_file?`/api/campaigns/${id}/tabletop/characters/${token.character_id}/images/token/${token_file}`:null})), objects: objects.rows.map(object=>({...object,image_url:`/api/campaigns/${id}/tabletop/objects/${object.id}/image`})), ...chat, members: members.rows }
   }
   @Post('campaigns/:id/tabletop/settings') async tableSettings(@Param('id') id: string, @Body() body: Record<string, unknown>, @Req() req: Request) {
     this.accounts.mutation(req)
@@ -458,7 +488,14 @@ class ApiController {
     const command = literal===true ? null : /^\/(?:roll|r)\s+(.+)$/i.exec(content)
     if (literal!==true && content.startsWith('/') && !command) throw new BadRequestException('Comando desconhecido. Use /roll 1d20 ou envie uma mensagem.')
     const roll = dice!==undefined ? rollDiceGroups(dice) : command ? rollDice(command[1]) : null
-    return (await this.db.pool.query('INSERT INTO tabletop_messages(campaign_id,user_id,content,roll) VALUES($1,$2,$3,$4) RETURNING id::text', [id, access.user.id, content, roll ? JSON.stringify(roll) : null])).rows[0]
+    // Keep message IDs in commit order within a campaign so polling cannot skip a concurrent insert.
+    const { rows } = await this.db.pool.query(`
+      WITH campaign AS MATERIALIZED (SELECT id FROM campaigns WHERE id=$1 FOR NO KEY UPDATE)
+      INSERT INTO tabletop_messages(campaign_id,user_id,content,roll)
+      SELECT id,$2,$3,$4 FROM campaign RETURNING id::text`,
+    [id, access.user.id, content, roll ? JSON.stringify(roll) : null])
+    if (!rows.length) throw new NotFoundException('Mesa não encontrada.')
+    return rows[0]
   }
   @Post('campaigns/:id/invitations') async invite(@Param('id') id: string, @Req() req: Request) {
     this.accounts.mutation(req)
