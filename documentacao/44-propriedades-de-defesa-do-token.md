@@ -41,3 +41,5 @@ A suíte da mesa no Chromium adicionou uma quarta barra, ligou seus dois lados a
 Marque **Salvar estado para novos mapas** antes de salvar as propriedades. O personagem passa a usar essa configuração quando for colocado novamente, inclusive em outro cenário. O estado guarda barras e seus vínculos, visão, luz, auras, condições, imagem, Defesa e Observação. Novas presenças recebem uma cópia da configuração, com coordenadas e tamanho calculados pelo cenário de destino. Vínculos continuam apontando para os campos da ficha e leem seus valores atuais.
 
 A API grava o token e os campos vinculados na mesma transação. Quando a opção de estado é marcada, o padrão do personagem é gravado nessa transação. O teste de integração criou outro cenário e confirmou que a nova presença recebeu a barra e a visão salvas. Build e checagem de tipos passaram.
+
+No Chromium, a edição direta no token mudou a barra de 15/25 para 19/36, persistiu os dois valores na ficha e guardou os vínculos e o alcance de visão no estado do personagem. Os 30 testes unitários também passaram.
