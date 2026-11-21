@@ -95,17 +95,21 @@ export function drawDie(context:CanvasRenderingContext2D,die:VisualDie,x:number,
   const right=unit(cross(Math.abs(normal[1])>.95?[1,0,0]:[0,1,0],normal))
   const up=cross(normal,right)
   const spin=(1-progress)**2*Math.PI*2
-  const a=spin*(1.24+index%3), b=spin*(1.72+index%2)
+  // Keep the octahedron slightly tilted so the result and its neighboring faces stay visible.
+  const octahedral=die.sides===8
+  const a=spin*(1.24+index%3)+(octahedral ? .42 : 0)
+  const b=spin*(1.72+index%2)+(octahedral ? .24 : 0)
+  const depth=octahedral ? .3 : .18
   const ca=Math.cos(a),sa=Math.sin(a),cb=Math.cos(b),sb=Math.sin(b)
   const rotate=(v:Vector):Vector=>{
     const px=dot(right,v),py=dot(up,v),pz=dot(normal,v)
     const py2=py*ca-pz*sa,pz2=py*sa+pz*ca
     return [px*cb+pz2*sb,py2,pz2*cb-px*sb]
   }
-  const perspective=([px,py,pz]:Vector)=>[x+px*radius/(1-pz*.18),y-py*radius/(1-pz*.18)] as const
+  const perspective=([px,py,pz]:Vector)=>[x+px*radius/(1-pz*depth),y-py*radius/(1-pz*depth)] as const
   for (const [faceIndex,face] of faces.entries()) {
     const [nx,ny,nz]=rotate(face.normal)
-    if (nz<=.04) continue
+    if (nz<=(octahedral ? depth*dot(face.normal,face.center) : .04)) continue
     const points=face.vertices.map(vertex=>perspective(rotate(vertex)))
     context.beginPath()
     for (const [pointIndex,[sx,sy]] of points.entries()) {

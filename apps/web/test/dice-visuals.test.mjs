@@ -32,3 +32,25 @@ test('usa os sólidos dos dados comuns e termina com a face sorteada', () => {
   drawDie(canvas,{sides:1000,value:997},0,0,22,1,0)
   assert.deepEqual(labels,['997'])
 })
+
+test('mantém o volume do d8 durante o giro e na pose final', () => {
+  const triangles = []
+  const labels = []
+  const canvas = {
+    beginPath() { triangles.push([]) },
+    moveTo(x, y) { triangles.at(-1).push([x, y]) },
+    lineTo(x, y) { triangles.at(-1).push([x, y]) },
+    closePath() {}, fill() {}, stroke() {},
+    fillText(text) { labels.push(text) },
+  }
+  for (const progress of [.5, 1]) {
+    triangles.length = 0
+    labels.length = 0
+    drawDie(canvas, { sides: 8, value: 5 }, 0, 0, 22, progress, 0)
+    const areas = triangles.map(([a, b, c]) =>
+      Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2,
+    ).sort((a, b) => b - a)
+    assert.ok(areas[1] > areas[0] / 2, 'A segunda face visível deve ter área suficiente para mostrar o volume.')
+  }
+  assert.deepEqual(labels, ['5'])
+})
