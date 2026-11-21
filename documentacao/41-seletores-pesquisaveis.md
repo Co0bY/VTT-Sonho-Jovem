@@ -9,3 +9,5 @@ O componente recebe separadamente o rótulo exibido e o valor persistido. Assim,
 ## Validação
 
 O build, a checagem de tipos e os testes unitários passaram. A suíte de ficha no Chromium conferiu os seletores de tipos, os valores de lista, as macros e um menu dentro da ficha em nova janela. Um teste com sessões convidadas também confirmou a pesquisa e a seleção de dois jogadores em **Visível para**, a persistência e o modal em 390 px.
+
+A suíte completa da mesa também passou. Ela cobre os seletores de pastas, camadas e grid, o estado sem resultados e a seleção por teclado de uma unidade encontrada pela busca sem acento.
