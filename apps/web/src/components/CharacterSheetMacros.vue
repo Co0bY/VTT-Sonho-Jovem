@@ -1,9 +1,22 @@
 <script setup lang="ts">
+import FilterSelect from './FilterSelect.vue'
+import { selectOptions } from '../tabletop/select-options'
 import { computed, ref, watch } from 'vue'
 import { events, diceAction, reductions, MAX_DICE_GROUPS, macroText, parseMacros, type DiceAction, type DiceGroup, type Reduction, type MacroAction, type MacroEvent, type MacroField, type SheetMacro } from '../tabletop/sheet-macros'
 
 const props=defineProps<{modelValue:SheetMacro[];fields:MacroField[];disabled:boolean}>()
 const emit=defineEmits<{'update:modelValue':[rules:SheetMacro[]]}>()
+const fieldsForSelect = computed(() => props.fields.map(field => ({ value: field.id, label: `${field.label} (${field.reference})` })))
+const eventOptions = selectOptions(events)
+const actionOptions = computed(() => [
+  { value: 'chat', label: 'Enviar ao chat' },
+  { value: 'rolar', label: 'Rolar dados' },
+  { value: 'atribuir', label: 'Atualizar outro campo', disabled: props.fields.length < 2 },
+])
+const quantityOptions = selectOptions({ input: 'Valor do input', fixed: 'Definir valor' })
+const reductionOptions = selectOptions(reductions)
+const resultOptions = [{ value: '', label: 'Sem cálculo' }, { value: 'sucesso', label: 'Definir Sucesso' }, ...reductionOptions]
+const combineOptions = [{ value: '', label: 'Mostrar separados' }, ...reductionOptions]
 const mode=ref<'blocks'|'text'>('blocks')
 const source=ref('')
 const textError=ref('')
@@ -60,21 +73,15 @@ function update(index:number,patch:Partial<SheetMacro>){
   emit('update:modelValue',props.modelValue.map((rule,position)=>position===index?updated:rule))
   return true
 }
-function changeSlot(index:number,event:Event,slot:'fieldId'|'event'){
-  const input=event.target as HTMLSelectElement
-  const patch=slot==='fieldId'?{fieldId:input.value}:{event:input.value as MacroEvent}
-  if(!update(index,patch))input.value=props.modelValue[index]![slot]
-}
 function assign(index:number){
   const source=props.modelValue[index]!.fieldId
   const target=props.fields.find(field=>field.id!==source)
   if(!target){blockError.value='Adicione outro campo para usar como destino.';return}
   update(index,{action:{kind:'atribuir',targetId:target.id}})
 }
-function changeAction(index:number,event:Event){
-  const input=event.target as HTMLSelectElement
-  if(input.value==='atribuir')assign(index)
-  else update(index,{action:input.value==='chat'?{kind:'chat'}:{kind:'rolar',sides:6}})
+function changeAction(index:number,kind:MacroAction['kind']){
+  if(kind==='atribuir')assign(index)
+  else update(index,{action:kind==='chat'?{kind:'chat'}:{kind:'rolar',sides:6}})
 }
 function groupAction(rule:SheetMacro){
   return rule.action.kind==='rolar'?diceAction(rule.action):null
@@ -110,11 +117,10 @@ function editGroupNumber(index:number,groupIndex:number,event:Event,key:'count'|
     }else updateGroup(index,groupIndex,{[key]:value})
   }
 }
-function setGroupResult(index:number,groupIndex:number,group:DiceGroup,event:Event){
-  const operation=(event.target as HTMLSelectElement).value
+function setGroupResult(index:number,groupIndex:number,group:DiceGroup,operation:Reduction|'sucesso'|''){
   if(operation==='sucesso'){
     updateGroup(index,groupIndex,{reduction:'sucesso',success:{min:Math.min(4,group.sides),max:group.sides}})
-  }else updateGroup(index,groupIndex,{reduction:(operation||null) as Reduction|null,success:undefined})
+  }else updateGroup(index,groupIndex,{reduction:operation||null,success:undefined})
 }
 function editSuccessRange(index:number,groupIndex:number,group:DiceGroup,event:Event,key:'min'|'max'){
   const input=event.target as HTMLInputElement
@@ -185,31 +191,21 @@ function drop(event:DragEvent,index?:number){
       <div v-for="(rule,index) in modelValue" :key="index" class="macro-rule" @dragover.prevent @drop.prevent="drop($event,index)">
         <div class="macro-rule-blocks">
           <label class="macro-tile field-tile">Campo
-            <select :aria-label="`Campo da regra ${index+1}`" :value="rule.fieldId" :disabled="disabled"
-              @change="changeSlot(index,$event,'fieldId')">
-              <option v-for="field in fields" :key="field.id" :value="field.id">{{ field.label }} ({{ field.reference }})</option>
-            </select>
+            <FilterSelect :aria-label="`Campo da regra ${index+1}`" :model-value="rule.fieldId" :options="fieldsForSelect" compact
+              :disabled="disabled" @update:model-value="update(index,{fieldId:$event})" />
           </label>
           <label class="macro-tile event-tile">Quando
-            <select :aria-label="`Evento da regra ${index+1}`" :value="rule.event" :disabled="disabled"
-              @change="changeSlot(index,$event,'event')">
-              <option v-for="(label,event) in events" :key="event" :value="event">{{ label }}</option>
-            </select>
+            <FilterSelect :aria-label="`Evento da regra ${index+1}`" :model-value="rule.event" :options="eventOptions" compact
+              :disabled="disabled" @update:model-value="update(index,{event:$event})" />
           </label>
           <label class="macro-tile action-tile">Faça
-            <select :aria-label="`Ação da regra ${index+1}`" :value="rule.action.kind" :disabled="disabled"
-              @change="changeAction(index,$event)">
-              <option value="chat">Enviar ao chat</option><option value="rolar">Rolar dados</option>
-              <option value="atribuir" :disabled="fields.length<2">Atualizar outro campo</option>
-            </select>
+            <FilterSelect :aria-label="`Ação da regra ${index+1}`" :model-value="rule.action.kind" :options="actionOptions" compact
+              :disabled="disabled" @update:model-value="changeAction(index,$event)" />
           </label>
           <label v-if="rule.action.kind==='atribuir'" class="macro-tile action-tile">Campo de destino
-            <select :aria-label="`Destino da regra ${index+1}`" :value="rule.action.targetId" :disabled="disabled"
-              @change="update(index,{action:{kind:'atribuir',targetId:($event.target as HTMLSelectElement).value}})">
-              <option v-for="field in fields.filter(field=>field.id!==rule.fieldId)" :key="field.id" :value="field.id">
-                {{ field.label }} ({{ field.reference }})
-              </option>
-            </select>
+            <FilterSelect :aria-label="`Destino da regra ${index+1}`" :model-value="rule.action.targetId"
+              :options="fieldsForSelect.filter(field=>field.value!==rule.fieldId)" compact :disabled="disabled"
+              @update:model-value="update(index,{action:{kind:'atribuir',targetId:$event}})" />
           </label>
         </div>
         <button type="button" :aria-label="`Excluir regra ${index+1}`" :disabled="disabled" @click="remove(index)">Excluir</button>
@@ -217,10 +213,9 @@ function drop(event:DragEvent,index?:number){
           <fieldset v-for="(group,groupIndex) in groupAction(rule)?.groups" :key="groupIndex" class="dice-group" :disabled="disabled">
             <legend>Rolagem {{ groupIndex+1 }}</legend>
             <label>Quantidade de dados
-              <select :aria-label="`Origem da quantidade da rolagem ${groupIndex+1}`" :value="group.count===null?'input':'fixed'"
-                @change="updateGroup(index,groupIndex,{count:($event.target as HTMLSelectElement).value==='input'?null:1})">
-                <option value="input">Valor do input</option><option value="fixed">Definir valor</option>
-              </select>
+              <FilterSelect :aria-label="`Origem da quantidade da rolagem ${groupIndex+1}`" :model-value="group.count===null?'input':'fixed'"
+                :options="quantityOptions" compact :disabled="disabled"
+                @update:model-value="updateGroup(index,groupIndex,{count:$event==='input'?null:1})" />
             </label>
             <label v-if="group.count!==null">Dados lançados
               <input :aria-label="`Dados lançados na rolagem ${groupIndex+1}`" inputmode="numeric" :value="group.count"
@@ -231,12 +226,8 @@ function drop(event:DragEvent,index?:number){
                 @input="editGroupNumber(index,groupIndex,$event,'sides')" @change="restoreGroupNumber($event,group.sides)">
             </label>
             <label>Resultado dos dados
-              <select :aria-label="`Resultado da rolagem ${groupIndex+1}`" :value="group.reduction??''"
-                @change="setGroupResult(index,groupIndex,group,$event)">
-                <option value="" aria-label="Sem cálculo"></option>
-                <option value="sucesso">Definir Sucesso</option>
-                <option v-for="(label,operation) in reductions" :key="operation" :value="operation">{{ label }}</option>
-              </select>
+              <FilterSelect :aria-label="`Resultado da rolagem ${groupIndex+1}`" :model-value="group.reduction??''"
+                :options="resultOptions" compact :disabled="disabled" @update:model-value="setGroupResult(index,groupIndex,group,$event)" />
             </label>
             <template v-if="group.reduction==='sucesso' && group.success">
               <label>Sucesso de
@@ -254,11 +245,9 @@ function drop(event:DragEvent,index?:number){
           <div class="macro-add">
             <button type="button" :disabled="disabled || (groupAction(rule)?.groups.length??0)>=MAX_DICE_GROUPS" @click="addGroup(index)">Adicionar rolagem</button>
             <label v-if="(groupAction(rule)?.groups.length??0)>1">Resultados das rolagens
-              <select aria-label="Combinar resultados das rolagens" :value="groupAction(rule)?.combine??''" :disabled="disabled || groupAction(rule)?.groups.some(group=>group.reduction===null)"
-                @change="updateDice(index,{combine:(($event.target as HTMLSelectElement).value||null) as Reduction|null})">
-                <option value="">Mostrar separados</option>
-                <option v-for="(label,operation) in reductions" :key="operation" :value="operation">{{ label }}</option>
-              </select>
+              <FilterSelect aria-label="Combinar resultados das rolagens" :model-value="groupAction(rule)?.combine??''"
+                :options="combineOptions" compact :disabled="disabled || groupAction(rule)?.groups.some(group=>group.reduction===null)"
+                @update:model-value="updateDice(index,{combine:$event||null})" />
               <small v-if="groupAction(rule)?.groups.some(group=>group.reduction===null)">Escolha um resultado em cada rolagem para combinar.</small>
             </label>
           </div>
@@ -267,9 +256,8 @@ function drop(event:DragEvent,index?:number){
       <div class="macro-drop" @dragover.prevent @drop.prevent="drop($event)">
         <span>Solte um campo aqui para criar uma regra. Solte eventos e ações sobre uma regra para alterá-la.</span>
         <div class="macro-add">
-          <select aria-label="Campo para nova regra" :value="availableField?.id" :disabled="disabled" @change="newField=($event.target as HTMLSelectElement).value">
-            <option v-for="field in fields" :key="field.id" :value="field.id">{{ field.label }} ({{ field.reference }})</option>
-          </select>
+          <FilterSelect aria-label="Campo para nova regra" :model-value="availableField?.id" :options="fieldsForSelect" compact
+            :disabled="disabled" @update:model-value="newField=$event" />
           <button type="button" :disabled="disabled" @click="add()">Adicionar regra</button>
         </div>
       </div>
@@ -303,7 +291,8 @@ quando ataque clique rolar 2d20 maior, d6 combinar somar</pre>
 .field-tile{background:#503778}.event-tile{background:#83541b}.action-tile{background:#176248}
 .macro-rule{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px solid #59436a;border-radius:8px}
 .macro-rule label{display:grid;gap:4px}
-.macro-rule select,.macro-rule input,.macro-add select{width:auto;max-width:100%;margin:0;padding:5px}
+.macro-rule input{max-width:100%;margin:0;padding:5px}
+.macro-rule .filter-select,.macro-add .filter-select{width:min(165px,100%)}
 .macro-rule input{width:84px}
 .macro-dice{display:grid;gap:8px;flex-basis:100%;min-width:0}
 .dice-group{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin:0;padding:8px 10px;min-width:0;border:1px solid #39755f;border-radius:6px;background:#142c27}

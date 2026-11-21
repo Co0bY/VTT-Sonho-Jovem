@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FilterSelect from './FilterSelect.vue'
 import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue'
 import CharacterSheetMacros from './CharacterSheetMacros.vue'
 import { macroMessage, type MacroEvent, type MacroMessage } from '../tabletop/sheet-macros'
@@ -11,6 +12,7 @@ const props=defineProps<{open:boolean;master:boolean;readOnly?:boolean;character
 const emit=defineEmits<{close:[]}>()
 const name=ref(''),owner=ref(''),color=ref('#a47ae2'),localError=ref('')
 const visibleTo = ref<string[]>([])
+const ownerOptions = computed(() => props.members.map(member => ({ label: `${member.name} (${member.role})`, value: member.id })))
 const viewerOptions = computed(() => props.members.filter(member => member.role === 'jogador').map(member => ({ label: member.name, value: member.id })))
 const tab=ref('card'),description=ref(''),notes=ref('')
 const sheet=ref(editableSheet())
@@ -228,11 +230,10 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
       </fieldset></div>
       <p class="character-hint">Imagens opcionais, até 10 MB cada. Criar um personagem não o adiciona ao mapa.</p>
       <label>Nome do personagem<input v-model="name" maxlength="40" :disabled="busy" placeholder="Ex.: Guardião da floresta"></label>
-      <template v-if="master"><label for="character-owner">Controlado por</label><select id="character-owner" v-model="owner" required :disabled="busy"><option v-for="member in members" :key="member.id" :value="member.id">{{ member.name }} ({{ member.role === 'mestre' ? 'mestre' : 'jogador' }})</option></select></template>
-      <q-select v-if="master" v-model="visibleTo" :options="viewerOptions" label="Visível para"
-        multiple emit-value map-options outlined dark hide-dropdown-icon :disable="busy" class="character-visibility">
-        <template #append><span aria-hidden="true">▾</span></template>
-      </q-select>
+      <template v-if="master"><label for="character-owner">Controlado por</label><FilterSelect id="character-owner" v-model="owner" :options="ownerOptions" :disabled="busy" /></template>
+      <label v-if="master" for="character-visibility">Visível para</label>
+      <FilterSelect v-if="master" id="character-visibility" v-model="visibleTo" :options="viewerOptions"
+        multiple :disabled="busy" />
       <p v-if="master" class="character-hint">O mestre e o controlador sempre podem ver a ficha.</p>
       <label class="character-color">Cor de identificação<input v-model="color" type="color" :disabled="busy"></label>
       <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
@@ -261,8 +262,6 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
   </q-card-section></q-card></q-dialog>
 </template>
 <style scoped>
-.character-visibility { margin:12px 0 4px; }
-.character-visibility :deep(.q-field__native) { min-width:0;overflow-wrap:anywhere; }
 .character-readonly { display:grid;gap:12px; }
 .character-readonly img { max-width:180px;max-height:220px;object-fit:contain;border-radius:8px; }
 .character-dialog-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
@@ -274,5 +273,5 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
 
 .character-tabs{margin-bottom:20px;border-bottom:1px solid #59436a;color:#d8c0ed}.character-tabs :deep(.q-tab){font-size:13px;padding:0 12px}.character-tabs :deep(.q-tab--active){color:#e4c7ff}.character-editor textarea{display:block;width:100%;min-height:180px;resize:vertical;padding:12px;border:1px solid #59436a;border-radius:8px;background:#17111e;color:#eadff3;font:inherit;line-height:1.7;margin-top:8px}.character-editor textarea:focus{outline:2px solid #b48ce9;outline-offset:2px}
 
-.modal.character-dialog{width:1160px;max-width:94vw;height:90vh;overflow:auto}.character-dialog h2{font-size:24px;margin:12px 0 22px}.character-images{display:grid;grid-template-columns:1fr 1fr;gap:16px}.character-images fieldset{min-width:0;border:1px solid #59436a;border-radius:10px;padding:12px}.character-images legend{color:#d8c0ed;font-size:14px;padding:0 7px}.character-image-preview{height:145px;background:#15101d;border-radius:8px;display:grid;place-items:center;overflow:hidden;color:#c2a2e4;font-size:44px}.character-image-preview img{width:100%;height:100%;object-fit:contain}.token-preview img{max-width:130px;max-height:130px}.character-images label{font-size:11px;margin:12px 0}.character-images input[type=file]{padding:7px;font-size:10px;max-width:100%}.character-images p,.character-hint{font-size:11px!important;color:#ad96bc;line-height:1.7}.character-images button{font-size:11px;padding:6px 0}.character-hint{margin:12px 0}.character-dialog select{width:100%;padding:12px;border:1px solid #59436a;background:#17111e;color:#eadff3;border-radius:7px}.character-color{display:flex;align-items:center;justify-content:space-between}.character-color input{width:55px;height:35px;padding:3px;margin:0}.character-error{color:#ffc0d0!important}@media(max-width:480px){.character-images{gap:8px}.character-images fieldset{padding:8px}.character-image-preview{height:110px}.character-images input[type=file]{font-size:9px}}
+.modal.character-dialog{width:1160px;max-width:94vw;height:90vh;overflow:auto}.character-dialog h2{font-size:24px;margin:12px 0 22px}.character-images{display:grid;grid-template-columns:1fr 1fr;gap:16px}.character-images fieldset{min-width:0;border:1px solid #59436a;border-radius:10px;padding:12px}.character-images legend{color:#d8c0ed;font-size:14px;padding:0 7px}.character-image-preview{height:145px;background:#15101d;border-radius:8px;display:grid;place-items:center;overflow:hidden;color:#c2a2e4;font-size:44px}.character-image-preview img{width:100%;height:100%;object-fit:contain}.token-preview img{max-width:130px;max-height:130px}.character-images label{font-size:11px;margin:12px 0}.character-images input[type=file]{padding:7px;font-size:10px;max-width:100%}.character-images p,.character-hint{font-size:11px!important;color:#ad96bc;line-height:1.7}.character-images button{font-size:11px;padding:6px 0}.character-hint{margin:12px 0}.character-color{display:flex;align-items:center;justify-content:space-between}.character-color input{width:55px;height:35px;padding:3px;margin:0}.character-error{color:#ffc0d0!important}@media(max-width:480px){.character-images{gap:8px}.character-images fieldset{padding:8px}.character-image-preview{height:110px}.character-images input[type=file]{font-size:9px}}
 </style>
