@@ -28,26 +28,30 @@ export function rollDice(expression: string) {
 
 const reductions = ['maior','menor','somar','subtrair','multiplicar','dividir'] as const
 type Reduction=typeof reductions[number]
-type DiceGroup={count:number|null;sides:number;reduction:Reduction|'sucesso'|null;success?:{min:number;max:number}}
+type DiceGroup={count:number|null;countFieldId?:string;sides:number;reduction:Reduction|'sucesso'|null;success?:{min:number;max:number}}
 
 function reduction(value:unknown):value is Reduction {
   return reductions.some(operation=>operation===value)
 }
 
-export function diceGroups(raw:unknown,allowFieldValue:boolean){
+export function diceGroups(raw:unknown,allowFieldValue:boolean, acceptsField?: (id: string) => boolean){
   const invalid=():never=>{throw new BadRequestException('Configure de 1 a 10 rolagens, com 1 a 50 dados, 2 a 1.000 faces e operações válidas. Para combinar resultados, use pelo menos duas rolagens.')}
   if(!raw||typeof raw!=='object'||Array.isArray(raw))return invalid()
   const {groups,combine}=raw as Record<string,unknown>
   if(!Array.isArray(groups)||groups.length<1||groups.length>10||(combine!==null&&(!reduction(combine)||groups.length<2)))return invalid()
   const validatedGroups=groups.map((item:unknown):DiceGroup=>{
     if(!item||typeof item!=='object'||Array.isArray(item))return invalid()
-    const {count,sides,reduction:operation,success}=item as Record<string,unknown>
+    const {count,sides,reduction:operation,success,countFieldId}=item as Record<string,unknown>
     if(operation!==null&&operation!=='sucesso'&&!reduction(operation))return invalid()
     const faces=integer(sides,2,1000,'Faces do dado')
     const group:DiceGroup={
       count:allowFieldValue&&count===null?null:integer(count,1,50,'Quantidade de dados'),
       sides:faces,
       reduction:operation,
+    }
+    if (countFieldId !== undefined) {
+      if (count !== null || typeof countFieldId !== 'string' || !acceptsField?.(countFieldId)) return invalid()
+      group.countFieldId = countFieldId
     }
     if(operation==='sucesso'){
       if(!success||typeof success!=='object'||Array.isArray(success))return invalid()

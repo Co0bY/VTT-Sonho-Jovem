@@ -66,8 +66,8 @@ async function main(){
  const firstPage='00000000-0000-4000-8000-000000000001'
  const defaults={height:64,highlight:false,hideLabel:false,maximum:100,options:[]}
  const pages=[
-  {id:firstPage,width:800,height:1100,fields:[{...defaults,...layout.fields[0]}]},
-  {id:randomUUID(),width:800,height:600,fields:[{...defaults,id:randomUUID(),label:'Vida',reference:'vida',type:'bar',maximum:40,x:0,y:0,width:200,value:'23'}]},
+  {id:firstPage,width:800,height:1100,fields:[{...defaults,...layout.fields[0],tokenShortcut:true}]},
+  {id:randomUUID(),width:800,height:600,fields:[{...defaults,id:randomUUID(),label:'Vida',reference:'vida',type:'bar',tokenShortcut:false,maximum:40,x:0,y:0,width:200,value:'23'}]},
  ]
  const sheetV2={version:2,pages}
  const migration=form('Duas páginas',player)
@@ -76,21 +76,46 @@ async function main(){
  const migrated=await request(`${base}/characters/${empty.id}/settings`,201,migration,1)
  assert.equal(migrated.sheet.pages[0].backgroundUrl,legacyAgain.sheet_background_url)
  assert.deepEqual(migrated.sheet.pages[0].fields,pages[0].fields)
+ assert.deepEqual(migrated.sheet.pages[1].fields,pages[1].fields)
  const secondBackground=migrated.sheet.pages[1].backgroundUrl
  await asset(legacyAgain.sheet_background_url,200,1,image(80,110))
  await asset(secondBackground,200,1,image(80,60))
  await asset(secondBackground,200,0,image(80,60))
  await asset(secondBackground,403,2)
- for(const invalid of [{value:'41'},{reference:'for'},{height:601},{width:11},{type:'checkbox',value:'1'},{type:'radio',options:['A'],value:'B'}]){
+ for(const invalid of [{tokenShortcut:'true'},{value:'41'},{reference:'for'},{height:601},{width:11},{type:'checkbox',value:'1'},{type:'radio',options:['A'],value:'B'}]){
   const update=form('Ficha inválida',player)
   update.append('sheet',JSON.stringify({...sheetV2,pages:[pages[0],{...pages[1],fields:[{...pages[1].fields[0],...invalid}]}]}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)
  }
+ const oversized={...sheetV2,pages:[pages[0],{...pages[1],fields:Array.from({length:100},(_,i)=>({
+  ...pages[1].fields[0],id:randomUUID(),reference:`vida_${i}`,
+ }))}]}
+ const oversizedForm=form('Ficha existente',player)
+ oversizedForm.append('sheet',JSON.stringify(oversized))
+ await request(`${base}/characters/${empty.id}/settings`,400,oversizedForm,1)
+ const stored=(await db.query('SELECT sheet FROM tabletop_characters WHERE id=$1',[empty.id])).rows[0].sheet
+ const techniques=[{label:'Técnica existente'}]
+ await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[{...oversized,techniques},empty.id])
+ const preservedLargeSheet=await request(`${base}/characters/${empty.id}/settings`,201,oversizedForm,1)
+ assert.equal(preservedLargeSheet.sheet.pages.flatMap(page=>page.fields).length,101)
+ assert.equal(preservedLargeSheet.sheet.pages[0].fields[0].tokenShortcut,true)
+ assert.deepEqual(preservedLargeSheet.sheet.techniques,techniques)
+ await db.query('UPDATE tabletop_characters SET sheet=$1 WHERE id=$2',[stored,empty.id])
  const macro={fieldId:pages[1].fields[0].id,event:'clique',action:{kind:'rolar',sides:6}}
  for(const invalid of [[macro,macro],[{...macro,fieldId:randomUUID()}],[{...macro,event:'focus'}],[{...macro,action:{kind:'rolar',sides:1}}]]){
   const update=form('Regra inválida',player)
   update.append('sheet',JSON.stringify({...sheetV2,macros:invalid}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)
+ }
+ const leaf={kind:'rolar',groups:[{count:null,countFieldId:pages[0].fields[0].id,sides:8,reduction:'somar'}],combine:null}
+ const nested=(depth,action=leaf)=>depth===0?action:{kind:'escolher',label:`Seletor ${depth}`,options:[
+  {label:'Avançar',action:nested(depth-1,action)},{label:'Encerrar',action:{kind:'chat',text:'Fim'}},
+ ]}
+ for(const [action,status] of [[nested(5),201],[nested(17),400],[nested(1,{...leaf,groups:[{...leaf.groups[0],countFieldId:macro.fieldId}] }),400]]){
+  const flowForm=form('Macro com escolhas',player)
+  flowForm.append('sheet',JSON.stringify({...sheetV2,macros:[{...macro,action}]}))
+  const result=await request(`${base}/characters/${empty.id}/settings`,status,flowForm,1)
+  if(status===201)assert.deepEqual(result.sheet.macros[0].action,action)
  }
  const groups=[{count:3,sides:6,reduction:'subtrair'},{count:2,sides:8,reduction:'multiplicar'},{count:2,sides:20,reduction:'somar'}]
  await request(`${base}/messages`,201,{content:'/roll 3d6, 2d8, 2d20',dice:{groups,combine:null}},1)
@@ -230,7 +255,7 @@ async function main(){
  await asset(updated.sheet_background_url,404,1) // Visible tokens never expose the sheet background.
  await asset(updated.appearance_url,200,1,portrait) // A visible map token can expose its appearance to participants.
  await request(`${base}/characters/${hero.id}/settings`,403,form('Invasão',player),1)
- const privateForm=form('Privado',owner,portrait,tokenImage);privateForm.append('sheet',new Blob([image(80,110)],{type:'image/png'}),'ficha.png')
+ const privateForm=form('Privado',owner,portrait,tokenImage);privateForm.append('notes','Conteúdo privado');privateForm.append('sheet',new Blob([image(80,110)],{type:'image/png'}),'ficha.png')
  const privateCharacter=await request(`${base}/characters`,201,privateForm)
  await asset(privateCharacter.token_url,404,1)
  const subscription=await request(`${base}/presentations`,200,undefined,1)
@@ -273,9 +298,48 @@ async function main(){
  assert.ok((await request(base,200)).characters.some(c=>c.id===legacy.character_id))
  await request(`${base}/tokens/${legacy.id}/remove`,201,{})
  assert.ok((await request(base,200)).characters.some(c=>c.id===legacy.character_id))
+ const folder=await request(`${base}/character-folders`,201,{name:'Adversários'})
+ await request(`${base}/character-folders`,409,{name:' adversários '})
+ await request(`${base}/character-folders`,403,{name:'Proibida'},1)
+ const movePath=`${base}/characters/${privateCharacter.id}/folder`
+ await request(movePath,403,{folder_id:folder.id},1)
+ await request(movePath,404,{folder_id:randomUUID()})
+ await request(movePath,201,{folder_id:folder.id})
+ let guest=await request(base,200,undefined,1)
+ assert.ok(!guest.character_folders.some(f=>f.id===folder.id))
+ assert.ok(!guest.characters.some(c=>c.id===privateCharacter.id))
+ assert.ok(guest.tokens.some(t=>t.character_id===privateCharacter.id),'A visibilidade da ficha não esconde o token no mapa.')
+ const audience=form('Personagem com acesso')
+ audience.append('visible_to',JSON.stringify([player]))
+ await request(`${base}/characters/${privateCharacter.id}/settings`,201,audience)
+ const invalidAudience=form('Personagem com acesso')
+ invalidAudience.append('visible_to',JSON.stringify([outsider]))
+ await request(`${base}/characters/${privateCharacter.id}/settings`,400,invalidAudience)
+ const ownerCharacterAudience=form('Controle sem gerir acesso',player)
+ ownerCharacterAudience.append('visible_to','[]')
+ await request(`${base}/characters/${empty.id}/settings`,403,ownerCharacterAudience,1)
+ await request(`${base}/characters/${privateCharacter.id}/settings`,403,form('Tentativa de editar',owner),1)
+ guest=await request(base,200,undefined,1)
+ const shared=guest.characters.find(c=>c.id===privateCharacter.id)
+ assert.equal(shared.folder_id,folder.id)
+ assert.equal(shared.notes,'')
+ assert.ok(!('visible_to' in shared))
+ assert.ok(guest.character_folders.some(f=>f.id===folder.id))
+ await asset(shared.sheet_background_url,200,1,image(80,110))
+ await request(`${base}/character-folders/${folder.id}/remove`,403,{},1)
+ await request(`${base}/character-folders/${folder.id}/remove`,201,{})
+ assert.equal((await request(base,200,undefined,1)).characters.find(c=>c.id===privateCharacter.id).folder_id,null)
+ const revoked=form('Personagem com acesso revogado')
+ revoked.append('visible_to','[]')
+ await request(`${base}/characters/${privateCharacter.id}/settings`,201,revoked)
+ guest=await request(base,200,undefined,1)
+ assert.ok(!guest.characters.some(c=>c.id===privateCharacter.id))
+ assert.ok(guest.tokens.some(t=>t.character_id===privateCharacter.id))
+ await asset(shared.sheet_background_url,404,1)
+ assert.ok((await request(base,200)).characters.some(c=>c.id===privateCharacter.id),'Mestre sempre vê a ficha.')
  const missing=await db.query('SELECT t.id FROM tabletop_tokens t LEFT JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND c.id IS NULL',[campaign])
  assert.equal(missing.rowCount,0)
- console.log('PASS personagens independentes de cenários, imagens distintas, múltiplas presenças, edição sincronizada, permissões, sigilo de imagens, upload/limpeza, cenários vazios e compatibilidade de tokens anteriores.')
+ console.log('PASS personagens independentes de cenários, imagens distintas, múltiplas presenças, edição sincronizada, permissões, sigilo de imagens, upload/limpeza, cenários vazios, compatibilidade de tokens anteriores, pastas e visibilidade independente do mapa.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
  try{await db.query('DELETE FROM campaigns WHERE id=ANY($1)',[[campaign,other]]);await db.query('DELETE FROM users WHERE id=ANY($1)',[[owner,player,outsider]])}finally{await db.end();server?.kill('SIGTERM');if(root)await rm(root,{recursive:true,force:true})}
