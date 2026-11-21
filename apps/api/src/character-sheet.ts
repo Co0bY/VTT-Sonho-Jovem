@@ -7,16 +7,26 @@ export const MAX_SHEET_PAGES = 5
 export const MAX_SHEET_BYTES = 1_000_000
 export const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
 export const sheetPageParts = Array.from({length:MAX_SHEET_PAGES}, (_, index) => `sheet_page_${index}`)
-export type FieldType = SheetField['type'] | 'bar' | 'select' | 'radio' | 'checkbox'
-export type PageField = Omit<SheetField, 'type'> & {type:FieldType; height:number; highlight:boolean; hideLabel:boolean; readOnly?:boolean; maximum:number; options:string[]}
+export type FieldType = SheetField['type'] | 'textarea' | 'bar' | 'select' | 'radio' | 'checkbox'
+export type PageField = Omit<SheetField, 'type'> & {type:FieldType; height:number; highlight:boolean; hideLabel:boolean; readOnly?:boolean; tokenShortcut?:boolean; maximum:number; options:string[]}
 export type SheetPage = {id:string; width:number; height:number; fields:PageField[]; backgroundFile?:string; removeBackground?:boolean}
 type SheetMacro = {
   fieldId:string
   event:'clique'|'enter'|'mudanca'
   action:{kind:'chat'}|{kind:'atribuir';targetId:string}|{kind:'rolar';sides:number}|({kind:'rolar'} & ReturnType<typeof diceGroups>)
 }
-export type PagedSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]}
+export type PagedSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]; techniques?:unknown}
 export type StoredSheet = CharacterSheet | PagedSheet
+
+function countFields(sheet?: StoredSheet) {
+  return sheet?.version === 2 ? sheet.pages.reduce((count, page) => count + page.fields.length, 0) : 0
+}
+
+export function validateSheetFieldLimit(sheet?: StoredSheet, previous?: StoredSheet) {
+  if (countFields(sheet) > Math.max(100, countFields(previous))) {
+    throw new BadRequestException('A ficha aceita até 100 campos. Fichas existentes acima desse limite podem manter os campos já salvos.')
+  }
+}
 
 export function characterSheet(raw:unknown):StoredSheet {
   const fail=():never=>{throw new BadRequestException('Ficha inválida. Confira dimensões, referências únicas e posições dos campos.')}
@@ -48,24 +58,22 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
   const inRange = (value:unknown,min:number,max:number):value is number => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
   const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
   const pageIds = new Set<string>(), fieldIds = new Set<string>(), references = new Set<string>()
-  const types:readonly string[] = ['text','number','bar','select','radio','checkbox']
+  const types:readonly string[] = ['text','textarea','number','bar','select','radio','checkbox']
   if(!Array.isArray(raw)||raw.length<1||raw.length>MAX_SHEET_PAGES)return fail()
-  let fieldCount=0
   const pages = raw.map((page:unknown):SheetPage=>{
     if(!isRecord(page))return fail()
     const {id,width,height,fields,removeBackground}=page
     if(removeBackground!==undefined&&typeof removeBackground!=='boolean')return fail()
     if(typeof id!=='string'||!uuid.test(id)||pageIds.has(id)||!inRange(width,400,1600)||!inRange(height,300,4000)||!Array.isArray(fields)||fields.length>100)return fail()
-    fieldCount+=fields.length
-    if(fieldCount>100)return fail()
     pageIds.add(id)
     return {id,width,height,removeBackground,fields:fields.map((field:unknown):PageField=>{
       if(!isRecord(field))return fail()
-      const {id,label,reference,type,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,readOnly,maximum,options}=field
+      const {id,label,reference,type,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,readOnly,tokenShortcut,maximum,options}=field
       if(typeof id!=='string'||!uuid.test(id)||fieldIds.has(id)||typeof reference!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(reference)||references.has(reference))return fail()
       if(typeof label!=='string'||!label.trim()||label.length>60||typeof type!=='string'||!types.includes(type)||typeof value!=='string'||value.length>1000)return fail()
       if(!inRange(fieldWidth,12,width)||!inRange(fieldHeight,12,height)||!inRange(x,0,width-fieldWidth)||!inRange(y,0,height-fieldHeight))return fail()
       if(typeof highlight!=='boolean'||typeof hideLabel!=='boolean'||(readOnly!==undefined&&typeof readOnly!=='boolean')||!inRange(maximum,1,1000000)||!Number.isInteger(maximum))return fail()
+      if(tokenShortcut!==undefined&&typeof tokenShortcut!=='boolean')return fail()
       if(!Array.isArray(options)||options.length>20||options.some(o=>typeof o!=='string'||!o.trim()||o.trim()!==o||o.length>60)||new Set(options).size!==options.length)return fail()
       if(type==='number'&&value!==''&&!/^-?(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(value))return fail()
       if(type==='bar'&&(!/^\d+$/.test(value)||!inRange(Number(value),0,maximum)))return fail()
@@ -73,7 +81,7 @@ function pagedSheet(raw:unknown, macros:unknown, fail:()=>never):PagedSheet {
       if(type==='checkbox'&&value!=='true'&&value!=='false')return fail()
       fieldIds.add(id)
       references.add(reference)
-      return {id,label:label.trim(),reference,type:type as FieldType,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,...(readOnly===undefined?{}:{readOnly}),maximum,options}
+      return {id,label:label.trim(),reference,type:type as FieldType,x,y,width:fieldWidth,height:fieldHeight,value,highlight,hideLabel,...(readOnly===undefined?{}:{readOnly}),...(tokenShortcut===undefined?{}:{tokenShortcut}),maximum,options}
     })}
   })
   if(macros===undefined)return {version:2,pages}
