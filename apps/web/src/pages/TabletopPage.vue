@@ -21,11 +21,13 @@ const draft = ref('')
 const presentationCard=ref<CharacterCard|null>(null),presentationError=ref('')
 const presentationQueue:CharacterCard[]=[]
 let presentationCursor:string|undefined
+const compactCharacters=ref(false)
 const characterDialog=ref(false),characterTarget=ref<Character|null>(null)
 
 const editingLayer=ref<Layer>('geral'),objectName=ref(''),objectFile=ref<File>(),objectInput=ref<HTMLInputElement>()
 const transformTarget=ref<{id:string;name:string;rect:Rect;layer:Layer}|null>(null)
 const master = computed(() => state.value?.role === 'mestre')
+const sharedCharacter = computed(() => !!characterTarget.value && !master.value && characterTarget.value.owner_id !== state.value?.user.id)
 const selectedToken = computed(() => state.value?.tokens.find(t => t.id === selected.value))
 const loginLink = `/?retorno=${encodeURIComponent(`/mesas/${id}`)}`
 const tabs = [{ id: 'chat', label: 'Chat', icon: '☷' }, { id: 'characters', label: 'Personagens', icon: '◉' }, { id: 'members', label: 'Grupo', icon: '♙' }, { id: 'settings', label: 'Cenários', icon: '▦' },{ id:'layers',label:'Camadas',icon:'▱' }]
@@ -51,6 +53,10 @@ async function refresh() {
   const shouldScroll = !state.value || !element || element.scrollHeight - element.scrollTop - element.clientHeight < 90
   if (state.value?.scene.id && state.value.scene.id !== data.scene.id) {selected.value='';transformTarget.value=null}
   state.value = data
+  if (characterDialog.value && characterTarget.value && !master.value) {
+    const current = data.characters.find(character => character.id === characterTarget.value?.id)
+    if (!current || current.owner_id !== characterTarget.value.owner_id) characterDialog.value = false
+  }
   const presentations=await api<{cursor:string;events:{id:string;card:CharacterCard}[]}>(`${endpoint}/presentations${presentationCursor===undefined?'':`?after=${presentationCursor}`}`)
   if(disposed||requested!==revision)return
   presentationCursor=presentations.cursor
@@ -84,6 +90,15 @@ async function presentCard(characterId:string){
 }
 function openCharacter(character:Character|null=null){error.value='';characterTarget.value=character;characterDialog.value=true}
 async function saveCharacter(characterId:string|null,data:FormData){return action(async()=>{await api(characterId?`${endpoint}/characters/${characterId}/settings`:`${endpoint}/characters`,data)})}
+function createCharacterFolder(name: string) {
+  return action(async () => { await api(`${endpoint}/character-folders`, { name }) })
+}
+function removeCharacterFolder(folderId: string) {
+  return action(async () => { await api(`${endpoint}/character-folders/${folderId}/remove`, {}) })
+}
+function moveCharacterFolder(characterId: string, folderId: string | null) {
+  return action(async () => { await api(`${endpoint}/characters/${characterId}/folder`, { folder_id: folderId }) })
+}
 async function placeCharacter(characterId:string,point?:Point){
   const character=state.value?.characters.find(character=>character.id===characterId)
   if(!character||!master.value)return
@@ -144,14 +159,15 @@ onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(
             </div>
             <footer v-if="message.roll.combine"><span>{{ reductions[message.roll.combine] }}</span><strong>{{ message.roll.total }}</strong></footer>
           </template><template v-else><div class="dice-values"><b v-for="(value, index) in message.roll.rolls" :key="index">{{ value }}</b><span v-if="message.roll.modifier">{{ message.roll.modifier > 0 ? '+' : '' }}{{ message.roll.modifier }}</span></div><footer><span>RESULTADO</span><strong>{{ message.roll.total }}</strong></footer></template></div><p v-else>{{ message.content }}</p></article></div><div class="chat-composer"><div class="quick-dice"><button v-for="sides in [4,6,8,10,12,20]" :key="sides" :disabled="busy" @click="send(`/roll 1d${sides}`)">d{{ sides }}</button></div><form @submit.prevent="send()"><label class="sr-only" for="table-message">Mensagem ou comando de dados</label><textarea id="table-message" v-model="draft" rows="3" maxlength="2000" placeholder="Sua mensagem ou /roll 2d6+3" @keydown.enter.exact.prevent="send()"></textarea><div><span>Como <strong>{{ state.user.name }}</strong></span><button class="primary" :disabled="busy || !draft.trim()">Enviar ↗</button></div></form><small>Enter envia · Shift + Enter quebra linha</small></div></template>
-          <CharactersPanel v-else-if="panel === 'characters'" :characters="state.characters" :tokens="state.tokens" :members="state.members" :master="master" :busy="busy" :selected="selected" @view="viewCard" @create="openCharacter()" @edit="openCharacter" @place="placeCharacter" @select="selectCharacterToken" @remove="removeToken" @layer="setTokenLayer" />
+          <CharactersPanel v-else-if="panel === 'characters'" :characters="state.characters" :folders="state.character_folders" :user-id="state.user.id"
+            v-model:compact="compactCharacters" :create-folder="createCharacterFolder" :remove-folder="removeCharacterFolder" :move-folder="moveCharacterFolder" :tokens="state.tokens" :members="state.members" :master="master" :busy="busy" :selected="selected" @view="viewCard" @create="openCharacter()" @edit="openCharacter" @place="placeCharacter" @select="selectCharacterToken" @remove="removeToken" @layer="setTokenLayer" />
           <section v-else-if="panel === 'members'" class="panel-content"><div class="panel-heading"><h2>Grupo da campanha</h2><span>{{ state.members.length }} PARTICIPANTES</span></div><p class="panel-help">Pessoas com acesso à mesa. Para convidar mais jogadores, use a opção de convite na dashboard.</p><ul class="member-list"><li v-for="member in state.members" :key="member.id"><span>{{ member.name.slice(0, 1).toUpperCase() }}</span><div><strong>{{ member.name }}{{ member.id === state.user.id ? ' (você)' : '' }}</strong><small>{{ member.role === 'mestre' ? 'Mestre da mesa' : 'Jogador' }}</small></div></li></ul></section>
           <ScenesMenu v-else-if="panel === 'settings'" :error="error" :remove="removeScene" :scenes="state.scenes" :folders="state.folders" :save-folder="saveFolder" :remove-folder="removeFolder" :move-folder="moveSceneFolder" :active-id="state.scene.id" :master="master" :busy="busy" :create="createScene" :save="saveScene" :activate="activateScene" :upload="uploadBackground" />          <section v-else class="panel-content"><div class="panel-heading"><h2>Camadas do cenário</h2><span>{{ master ? editingLayer.toUpperCase() : 'GERAL' }}</span></div><p class="panel-help">Fundo: mapa e composição. Mestre: conteúdo oculto dos jogadores. Geral: tokens e objetos visíveis ao grupo.</p><template v-if="master"><p class="panel-help">Escolha a camada acima do tabuleiro. Selecione uma imagem e arraste os cantos para redimensionar ou a alça circular para girar. Os cantos mantêm a proporção em passos do grid; Alt permite tamanho livre. Duplo clique abre as medidas e a exclusão. Del exclui a seleção.</p><form @submit.prevent="addImage"><label>Nome do objeto<input v-model="objectName" required maxlength="100" placeholder="Ex.: árvore, ponte, pista secreta"></label><label>Imagem do objeto<input ref="objectInput" type="file" accept="image/png,image/jpeg,image/webp" required @change="objectFile = ($event.target as HTMLInputElement).files?.[0]"></label><p class="panel-help">Até 10 MB. Será adicionado à camada {{ editingLayer }}.</p><button class="primary full" :disabled="busy || !objectFile">Adicionar imagem à camada</button></form></template><ul class="layer-object-list"><li v-for="object in state.objects.filter(object => !master || object.layer === editingLayer)" :key="object.id"><img :src="object.image_url" alt=""><div><strong>{{ object.name }}</strong><small>{{ object.layer }}</small></div><button v-if="master" class="text-button" @click="editImage(object.id, object)">Redimensionar</button></li></ul></section>
 
         </aside>
       </div><footer class="table-status"><span><i></i>{{ busy ? 'Salvando…' : error || networkError ? 'Falha de atualização' : 'Alterações salvas no servidor' }}</span><span>Protótipo · atualização a cada 2 s <b>✦ SONHO JOVEM</b></span></footer>
     <CharacterCardDialog :card="presentationCard" :master="master" :busy="busy" :error="presentationError" @close="closeCard" @present="presentCard" />
-    <CharacterDialog :master="master" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
+    <CharacterDialog :master="master" :read-only="sharedCharacter" :open="characterDialog" :character="characterTarget" :members="state.members" :user-id="state.user.id" :busy="busy" :error="error" :save="saveCharacter" :send-macro="sendMacro" @close="characterDialog=false" />
     <ImageTransformDialog :scene="state.scene" :target="transformTarget" :busy="busy" :error="error" :save="transformImage" :remove="removeObject" @close="transformTarget = null" /></template>
   </div>
 </template>

@@ -4,7 +4,7 @@ import type { CharacterSheet, FieldType, SheetField, SheetPage } from '../tablet
 import type { MacroEvent } from '../tabletop/sheet-macros'
 import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
 
-const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;clickMacros:ReadonlySet<string>}>()
+const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;readOnly?:boolean;clickMacros:ReadonlySet<string>}>()
 const emit=defineEmits<{
   'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string];trigger:[fieldId:string,event:MacroEvent,value:string]
 }>()
@@ -230,7 +230,7 @@ function trigger(field:SheetField,event:Event,kind:MacroEvent){
     if(target instanceof HTMLInputElement&&target.type==='text')event.preventDefault()
     if(event.repeat)return
   }
-  if(editing.value||props.disabled)return
+  if(editing.value||props.disabled||props.readOnly)return
   const value=target instanceof HTMLInputElement&&target.type==='checkbox'?String(target.checked):target.value
   emit('trigger',field.id,kind,value)
 }
@@ -241,7 +241,7 @@ defineExpose({finishEditing})
 <template>
   <div class="sheet-editor">
     <div class="sheet-toolbar">
-      <button type="button" :disabled="disabled" :aria-pressed="editing" @click="editing ? finishEditing() : editing=true">
+      <button v-if="!readOnly" type="button" :disabled="disabled" :aria-pressed="editing" @click="editing ? finishEditing() : editing=true">
         {{ editing ? 'Concluir edição' : 'Editar ficha' }}
       </button>
       <nav aria-label="Páginas da ficha">
@@ -283,31 +283,31 @@ defineExpose({finishEditing})
               <span v-if="!field.hideLabel && field.type==='radio'" class="field-label">{{ field.label }}</span>
               <label v-else-if="!field.hideLabel" class="field-label" :for="`sheet-value-${field.id}`">{{ field.label }}</label>
               <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
-                :aria-label="field.label" :value="field.value" :disabled="disabled" :readonly="field.readOnly" :inputmode="field.type==='number'?'decimal':'text'"
+                :aria-label="field.label" :value="field.value" :disabled="disabled || readOnly" :readonly="field.readOnly" :inputmode="field.type==='number'?'decimal':'text'"
                 :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLInputElement).value})">
               <div v-else-if="field.type==='bar'" class="bar-control">
                 <input :id="`sheet-value-${field.id}`" type="range" min="0" :max="field.maximum" :value="field.value"
                   :style="{'--fill':`${Number(field.value)/field.maximum*100}%`}"
-                  :aria-label="field.label" :aria-valuetext="`${field.value} de ${field.maximum}`" :disabled="disabled || field.readOnly" @input="changeBar(field,($event.target as HTMLInputElement).value)">
+                  :aria-label="field.label" :aria-valuetext="`${field.value} de ${field.maximum}`" :disabled="disabled || readOnly || field.readOnly" @input="changeBar(field,($event.target as HTMLInputElement).value)">
                 <span>{{ field.value }} / {{ field.maximum }}</span>
               </div>
               <select v-else-if="field.type==='select'" :id="`sheet-value-${field.id}`" class="plain-control"
-                :aria-label="field.label" :value="field.value" :disabled="disabled || field.readOnly" @change="updateField(field.id,{value:($event.target as HTMLSelectElement).value})">
+                :aria-label="field.label" :value="field.value" :disabled="disabled || readOnly || field.readOnly" @change="updateField(field.id,{value:($event.target as HTMLSelectElement).value})">
                 <option value="">Selecione</option>
                 <option v-for="(option,index) in field.options" :key="index" :value="option">{{ option }}</option>
               </select>
               <div v-else-if="field.type==='radio'" class="radio-options" role="radiogroup" :aria-label="field.label">
                 <label v-for="(option,index) in field.options" :key="index">
                   <input type="radio" :name="`sheet-radio-${field.id}`" :value="option" :checked="field.value===option"
-                    :disabled="disabled || field.readOnly" @change="updateField(field.id,{value:option})"> {{ option }}
+                    :disabled="disabled || readOnly || field.readOnly" @change="updateField(field.id,{value:option})"> {{ option }}
                 </label>
               </div>
               <input v-else :id="`sheet-value-${field.id}`" type="checkbox" :aria-label="field.label" :checked="field.value==='true'"
-                :disabled="disabled || field.readOnly" @change="updateField(field.id,{value:String(($event.target as HTMLInputElement).checked)})">
+                :disabled="disabled || readOnly || field.readOnly" @change="updateField(field.id,{value:String(($event.target as HTMLInputElement).checked)})">
             </div>
-            <button v-if="!editing && clickMacros.has(field.id)" type="button" class="macro-trigger"
+            <button v-if="!readOnly && !editing && clickMacros.has(field.id)" type="button" class="macro-trigger"
               :class="{ 'macro-trigger-left':field.x>=28 && field.x+field.width+28>page.width }"
-              :disabled="disabled" :aria-label="`Executar macro de ${field.label}`" :title="`Executar macro de ${field.label}`"
+              :disabled="disabled || readOnly" :aria-label="`Executar macro de ${field.label}`" :title="`Executar macro de ${field.label}`"
               @click="emit('trigger',field.id,'clique',field.value)"><span aria-hidden="true">▶</span></button>
             <template v-if="editing">
               <button v-if="!(editingValue && selectedId===field.id)" type="button" class="move-handle" :disabled="disabled || placing" :aria-label="`Mover campo ${field.label}`"

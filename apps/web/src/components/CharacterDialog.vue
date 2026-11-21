@@ -7,9 +7,11 @@ import { editableSheet, fieldValueError, sheetError } from '../tabletop/characte
 import CharacterTextEditor from './CharacterTextEditor.vue'
 import { editorHtml } from '../tabletop/rich-text'
 import type { Character, Member } from '../tabletop/types'
-const props=defineProps<{open:boolean;master:boolean;character:Character|null;members:Member[];userId:string;busy:boolean;error:string;save:(id:string|null,data:FormData)=>Promise<boolean>;sendMacro:(message:MacroMessage)=>Promise<unknown>}>()
+const props=defineProps<{open:boolean;master:boolean;readOnly?:boolean;character:Character|null;members:Member[];userId:string;busy:boolean;error:string;save:(id:string|null,data:FormData)=>Promise<boolean>;sendMacro:(message:MacroMessage)=>Promise<unknown>}>()
 const emit=defineEmits<{close:[]}>()
 const name=ref(''),owner=ref(''),color=ref('#a47ae2'),localError=ref('')
+const visibleTo = ref<string[]>([])
+const viewerOptions = computed(() => props.members.filter(member => member.role === 'jogador').map(member => ({ label: member.name, value: member.id })))
 const tab=ref('card'),description=ref(''),notes=ref('')
 const sheet=ref(editableSheet())
 const macroEditor=ref<InstanceType<typeof CharacterSheetMacros>>()
@@ -156,6 +158,7 @@ watch(()=>[props.open,props.character?.id],()=>{
   releasePages()
   macroStatus.value=''
   if(!props.open){for(const kind of kinds){release(kind);uploads[kind]=null};return}
+  visibleTo.value = [...(props.character?.visible_to ?? [])]
   sheet.value=editableSheet(props.character?.sheet,props.character?.sheet_background_url)
   tab.value='card';description.value=editorHtml(props.character?.description??'',props.character?.description_format);notes.value=editorHtml(props.character?.notes??'',props.character?.notes_format)
   name.value=props.character?.name??'';owner.value=props.character?.owner_id??props.userId;color.value=props.character?.color??'#a47ae2';localError.value=''
@@ -177,6 +180,7 @@ function selectImage(kind:Kind,event:Event){
 }
 function removeImage(kind:Kind){release(kind);uploads[kind]=null;removed[kind]=true;if(inputs[kind])inputs[kind]!.value=''}
 async function save(){
+  if (props.readOnly) return
   localError.value=''
   if(pendingImages.size){localError.value='Aguarde o carregamento da imagem de fundo.';return}
   if(!name.value.trim()){tab.value='card';localError.value='Informe o nome do personagem.';return}
@@ -187,6 +191,7 @@ async function save(){
   if(invalidSheet){tab.value='sheet';localError.value=invalidSheet;return}
   sheetEditor.value?.finishEditing()
   const data=new FormData();data.append('sheet',JSON.stringify({...sheet.value,pages:sheet.value.pages.map(({backgroundUrl,...page})=>page)}));data.append('text_format','html');data.append('name',name.value);if(props.master)data.append('owner_id',owner.value);data.append('color',color.value);data.append('description',description.value);data.append('notes',notes.value)
+  if (props.master) data.append('visible_to', JSON.stringify(visibleTo.value))
   for(const kind of kinds){if(uploads[kind])data.append(kind,uploads[kind]!);if(removed[kind])data.append(`remove_${kind}`,'true')}
   sheet.value.pages.forEach((page,index)=>{const upload=pageUploads.get(page.id);if(upload)data.append(`sheet_page_${index}`,upload.file)})
   if(await props.save(props.character?.id??null,data))emit('close')
@@ -196,7 +201,7 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
 <template>
   <q-dialog :model-value="open" :persistent="busy" @update:model-value="emit('close')"><q-card class="modal character-dialog"><q-card-section>
     <header class="character-dialog-header">
-      <div><span class="eyebrow">PERSONAGENS DA CAMPANHA</span><h2>{{ character ? 'Editar personagem' : 'Novo personagem' }}</h2></div>
+      <div><span class="eyebrow">PERSONAGENS DA CAMPANHA</span><h2>{{ readOnly ? character?.name : character ? 'Editar personagem' : 'Novo personagem' }}</h2></div>
       <button type="button" class="text-button sheet-window-button" aria-label="Abrir ficha em nova janela"
         title="Abrir ficha em nova janela" @click="openSheetWindow">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M13 5h6v6m0-6-9 9m0-9H5v14h14v-5"/></svg>
@@ -205,11 +210,16 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
     <q-tabs v-model="tab" class="character-tabs" align="left" no-caps outside-arrows mobile-arrows aria-label="Abas do personagem">
       <q-tab name="card" label="Cartão de visita" :disable="busy" />
       <q-tab name="sheet" label="Ficha" :disable="busy" />
-      <q-tab name="notes" label="Anotações" :disable="busy" />
-      <q-tab name="settings" label="Configurações da ficha" :disable="busy" />
+      <q-tab v-if="!readOnly" name="notes" label="Anotações" :disable="busy" />
+      <q-tab v-if="!readOnly" name="settings" label="Configurações da ficha" :disable="busy" />
     </q-tabs>
     <form @submit.prevent="save">
       <section v-show="tab === 'card'" role="tabpanel" aria-label="Cartão de visita">
+      <div v-if="readOnly" class="character-readonly">
+        <img v-if="character?.appearance_url" :src="character.appearance_url" :alt="`Aparência de ${name}`">
+        <div v-html="description"></div>
+      </div>
+      <template v-else>
       <div class="character-images"><fieldset v-for="kind in (['appearance','token'] as const)" :key="kind" :disabled="busy"><legend>{{ kind === 'appearance' ? 'Aparência' : 'Token' }}</legend>
         <div class="character-image-preview" :class="{ 'token-preview': kind === 'token' }"><img v-if="preview(kind)" :src="preview(kind)!" :alt="kind === 'appearance' ? 'Prévia da aparência' : 'Prévia do token'"><span v-else aria-hidden="true">{{ name.trim().slice(0,1).toUpperCase() || '✧' }}</span></div>
         <label>{{ kind === 'appearance' ? 'Imagem de aparência' : 'Imagem do token' }}<input :ref="el=>inputs[kind]=el as HTMLInputElement|null" type="file" accept="image/png,image/jpeg,image/webp" @change="selectImage(kind,$event)"></label>
@@ -219,32 +229,39 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
       <p class="character-hint">Imagens opcionais, até 10 MB cada. Criar um personagem não o adiciona ao mapa.</p>
       <label>Nome do personagem<input v-model="name" maxlength="40" :disabled="busy" placeholder="Ex.: Guardião da floresta"></label>
       <template v-if="master"><label for="character-owner">Controlado por</label><select id="character-owner" v-model="owner" required :disabled="busy"><option v-for="member in members" :key="member.id" :value="member.id">{{ member.name }} ({{ member.role === 'mestre' ? 'mestre' : 'jogador' }})</option></select></template>
+      <q-select v-if="master" v-model="visibleTo" :options="viewerOptions" label="Visível para"
+        multiple use-chips emit-value map-options outlined dark :disable="busy" class="character-visibility" />
+      <p v-if="master" class="character-hint">O mestre e o controlador sempre podem ver a ficha.</p>
       <label class="character-color">Cor de identificação<input v-model="color" type="color" :disabled="busy"></label>
       <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
+      </template>
       </section>
       <Teleport :to="sheetWindowTarget" :disabled="!sheetWindowTarget">
         <section v-show="sheetWindowTarget || tab === 'sheet'" aria-label="Ficha"
           :role="sheetWindowTarget ? undefined : 'tabpanel'" :class="{ 'sheet-window': sheetWindowTarget }">
           <h1 v-if="sheetWindowTarget">{{ name.trim() || 'Ficha do personagem' }}</h1>
-          <CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
+          <CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :read-only="readOnly" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
           <p v-if="macroStatus" role="status">{{ macroStatus }}</p>
           <p v-if="sheetWindowTarget && (localError || error)" role="alert" class="character-error">{{ localError || error }}</p>
         </section>
       </Teleport>
       <p v-if="tab === 'sheet' && sheetWindowTarget">A ficha está aberta em outra janela.</p>
-      <section v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">
+      <section v-if="!readOnly" v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">
         <CharacterTextEditor v-model="notes" label="Anotações" :disabled="busy" />
       </section>
-      <section v-show="tab === 'settings'" role="tabpanel" aria-label="Configurações da ficha">
+      <section v-if="!readOnly" v-show="tab === 'settings'" role="tabpanel" aria-label="Configurações da ficha">
         <CharacterSheetMacros v-if="open" ref="macroEditor" :model-value="sheet.macros ?? []" :fields="macroFields" :disabled="busy"
           @update:model-value="sheet={...sheet,macros:$event}" />
       </section>
       <p v-if="localError || error" role="alert" class="character-error">{{ localError || error }}</p>
-      <div class="modal-actions"><button type="button" class="text-button" :disabled="busy" @click="emit('close')">Cancelar</button><button class="primary" :disabled="busy">{{ character ? 'Salvar personagem' : 'Criar personagem' }}</button></div>
+      <div class="modal-actions"><button type="button" class="text-button" :disabled="busy" @click="emit('close')">{{ readOnly ? 'Fechar' : 'Cancelar' }}</button><button v-if="!readOnly" class="primary" :disabled="busy">{{ character ? 'Salvar personagem' : 'Criar personagem' }}</button></div>
     </form>
   </q-card-section></q-card></q-dialog>
 </template>
 <style scoped>
+.character-visibility { margin:12px 0 4px; }
+.character-readonly { display:grid;gap:12px; }
+.character-readonly img { max-width:180px;max-height:220px;object-fit:contain;border-radius:8px; }
 .character-dialog-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
 .sheet-window-button { display:grid; place-items:center; }
 .sheet-window-button:hover { background:#ffffff12; border-radius:8px; }
