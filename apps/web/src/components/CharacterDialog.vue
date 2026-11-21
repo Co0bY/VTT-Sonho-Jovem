@@ -5,11 +5,13 @@ import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue
 import CharacterSheetMacros from './CharacterSheetMacros.vue'
 import { macroMessage, type ChoiceAction, type MacroEvent, type MacroMessage, type TerminalAction } from '../tabletop/sheet-macros'
 import CharacterSheetEditor from './CharacterSheetEditor.vue'
-import { editableSheet, fieldValueError, sheetError } from '../tabletop/character-sheet'
+import CharacterSheetModels from './CharacterSheetModels.vue'
+import { editableSheet, fieldValueError, sheetError, type CharacterSheet, type Technique } from '../tabletop/character-sheet'
 import CharacterTextEditor from './CharacterTextEditor.vue'
 import { editorHtml } from '../tabletop/rich-text'
-import type { Character, Member } from '../tabletop/types'
-const props=defineProps<{open:boolean;master:boolean;readOnly?:boolean;character:Character|null;members:Member[];userId:string;busy:boolean;error:string;save:(id:string|null,data:FormData)=>Promise<boolean>;sendMacro:(message:MacroMessage)=>Promise<unknown>}>()
+import { techniqueAttack, techniqueCost, techniqueDamage } from '../tabletop/sheet-techniques'
+import type { Character, Member, Message } from '../tabletop/types'
+const props=defineProps<{open:boolean;master:boolean;readOnly?:boolean;character:Character|null;members:Member[];userId:string;busy:boolean;error:string;save:(id:string|null,data:FormData)=>Promise<boolean>;sendMacro:(message:MacroMessage)=>Promise<Pick<Message,'roll'>>}>()
 const emit=defineEmits<{close:[]}>()
 const name=ref(''),owner=ref(''),color=ref('#a47ae2'),localError=ref('')
 const visibleTo = ref<string[]>([])
@@ -17,9 +19,13 @@ const ownerOptions = computed(() => props.members.map(member => ({ label: `${mem
 const viewerOptions = computed(() => props.members.filter(member => member.role === 'jogador').map(member => ({ label: member.name, value: member.id })))
 const tab=ref('card'),description=ref(''),notes=ref('')
 const sheet=ref(editableSheet())
+const modelBusy = ref(false)
+const importedSheet = ref(false)
+const sheetRevision = ref(0)
 const macroEditor=ref<InstanceType<typeof CharacterSheetMacros>>()
 const macroFields=computed(()=>sheet.value.pages.flatMap(page=>page.fields))
 const savedMacros=computed(()=>{
+  if (importedSheet.value) return []
   const saved=props.character?.sheet
   return saved?.version===2?saved.macros??[]:[]
 })
@@ -73,6 +79,49 @@ async function runAction(action: TerminalAction, value: string) {
     localError.value=(error as Error).message
   }
 }
+const techniqueBusy=ref(false)
+const techniqueHits=ref(new Map<string,{key:string;hits:number}>())
+const fieldsById=computed(()=>new Map(macroFields.value.map(field=>[field.id,field])))
+function techniqueValues(row:Technique){
+  const value=(id:string|undefined)=>id ? fieldsById.value.get(id)?.value.trim() ?? '' : ''
+  const attribute=value(row.attribute)
+  const score=value(sheet.value.techniques?.attributes[attribute])
+  const data={name:value(row.name),level:value(row.level),element:value(row.element),
+    range:value(row.range),effect:value(row.effect),attribute,score}
+  return {...data,key:JSON.stringify(data)}
+}
+const damageReady=computed(()=>new Set(sheet.value.techniques?.rows.filter(row=>{
+  const result=techniqueHits.value.get(row.attribute)
+  return result && result.key===techniqueValues(row).key
+}).map(row=>row.attribute)))
+async function rollTechnique(row:Technique,action:'attack'|'damage'){
+  if(techniqueBusy.value || props.readOnly)return
+  const results=techniqueHits.value
+  const data=techniqueValues(row)
+  techniqueBusy.value=true
+  localError.value=''
+  macroStatus.value=''
+  try{
+    if(action==='damage'){
+      const result=results.get(row.attribute)
+      if(!result || result.key!==data.key)throw new Error('Role o ataque desta técnica antes do dano.')
+      await props.sendMacro(techniqueDamage(data.level,result.hits,`Dano · ${data.name}`))
+      results.delete(row.attribute)
+    }else{
+      if(!data.name||!data.element||!data.attribute)throw new Error('Preencha o nome, o elemento e o atributo da técnica.')
+      const details=[data.element,`Nível ${data.level}`,`${techniqueCost(data.level)} Ki/Mana`,data.range,data.attribute].filter(Boolean)
+      const caption=[`Ataque · ${data.name} (${details.join(' · ')})`,data.effect].filter(Boolean).join('\n')
+      const {roll}=await props.sendMacro(techniqueAttack(data.score,data.level,caption))
+      results.delete(row.attribute)
+      if(roll?.total)results.set(row.attribute,{key:data.key,hits:roll.total})
+    }
+    macroStatus.value='Rolagem enviada ao chat da mesa.'
+  }catch(error){
+    localError.value=(error as Error).message
+  }finally{
+    techniqueBusy.value=false
+  }
+}
 const pageUploads=reactive(new Map<string,{file:File;url:string}>())
 const pendingImages=reactive(new Map<string,string>())
 function cancelPageImage(id:string){
@@ -124,7 +173,19 @@ function pageBackground(id:string){
   const page=sheet.value.pages.find(page=>page.id===id)
   return pageUploads.get(id)?.url??(page?.removeBackground?null:page?.backgroundUrl)
 }
+function applySheetModel(model: CharacterSheet, backgrounds: Map<string, File>) {
+  releasePages()
+  for (const [id, file] of backgrounds) {
+    pageUploads.set(id, { file, url: URL.createObjectURL(file) })
+  }
+  sheet.value = model
+  techniqueHits.value = new Map()
+  importedSheet.value = true
+  sheetRevision.value++
+  macroStatus.value = ''
+}
 const sheetEditor=ref<InstanceType<typeof CharacterSheetEditor>>()
+const modalTarget = shallowRef<HTMLElement>()
 const sheetWindowTarget = shallowRef<HTMLElement>()
 let sheetWindow: Window | undefined
 
@@ -135,12 +196,16 @@ function closeSheetWindow() {
   popup?.close()
 }
 
-function openSheetWindow() {
+function focusSheetWindow() {
   if (sheetWindow && !sheetWindow.closed) {
     sheetWindow.focus()
-    return
+    return true
   }
+  return false
+}
+defineExpose({ focusSheetWindow })
 
+function openSheetWindow() {
   const popup = window.open('', '_blank', 'popup,width=1160,height=850,resizable=yes,scrollbars=yes')
   if (!popup) {
     localError.value = 'Permita pop-ups para abrir a ficha em uma nova janela.'
@@ -169,6 +234,7 @@ function openSheetWindow() {
     if (sheetWindow === popup) {
       sheetWindow = undefined
       sheetWindowTarget.value = undefined
+      emit('close')
     }
   }, { once: true })
 }
@@ -182,6 +248,9 @@ const removed=reactive<Record<Kind,boolean>>({appearance:false,token:false})
 function release(kind:Kind){if(previews[kind].startsWith('blob:'))URL.revokeObjectURL(previews[kind]);previews[kind]=''}
 watch(()=>[props.open,props.character?.id],()=>{
   closeSheetWindow()
+  modelBusy.value = false
+  techniqueHits.value = new Map()
+  importedSheet.value = false
   releasePages()
   macroStatus.value=''
   cancelChoice()
@@ -208,7 +277,7 @@ function selectImage(kind:Kind,event:Event){
 }
 function removeImage(kind:Kind){release(kind);uploads[kind]=null;removed[kind]=true;if(inputs[kind])inputs[kind]!.value=''}
 async function save(){
-  if (props.readOnly) return
+  if (modelBusy.value || props.readOnly) return
   localError.value=''
   if(pendingImages.size){localError.value='Aguarde o carregamento da imagem de fundo.';return}
   if(!name.value.trim()){tab.value='card';localError.value='Informe o nome do personagem.';return}
@@ -227,11 +296,17 @@ async function save(){
 onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)release(kind)})
 </script>
 <template>
-  <q-dialog :model-value="open" :persistent="busy" @update:model-value="emit('close')"><q-card class="modal character-dialog"><q-card-section>
+  <q-dialog :model-value="open && !sheetWindowTarget" :persistent="busy" :no-refocus="!!sheetWindowTarget"
+    @update:model-value="value => { if (!value && !sheetWindowTarget) emit('close') }">
+    <q-card class="modal character-dialog"><div ref="modalTarget" /></q-card>
+  </q-dialog>
+  <Teleport v-if="open && (sheetWindowTarget || modalTarget)" :to="sheetWindowTarget ?? modalTarget">
+  <q-card-section class="character-dialog-content" :class="{ 'sheet-window': sheetWindowTarget }">
     <header class="character-dialog-header">
-      <div><span class="eyebrow">PERSONAGENS DA CAMPANHA</span><h2>{{ readOnly ? character?.name : character ? 'Editar personagem' : 'Novo personagem' }}</h2></div>
-      <button type="button" class="text-button sheet-window-button" aria-label="Abrir ficha em nova janela"
-        title="Abrir ficha em nova janela" @click="openSheetWindow">
+      <h2 v-if="sheetWindowTarget">{{ name.trim() || 'Ficha do personagem' }}</h2>
+      <div v-else><span class="eyebrow">PERSONAGENS DA CAMPANHA</span><h2>{{ readOnly ? character?.name : character ? 'Editar personagem' : 'Novo personagem' }}</h2></div>
+      <button v-if="!sheetWindowTarget" type="button" class="text-button sheet-window-button" aria-label="Abrir ficha em nova janela"
+        title="Abrir ficha em nova janela" :disabled="busy" @click="openSheetWindow">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M13 5h6v6m0-6-9 9m0-9H5v14h14v-5"/></svg>
       </button>
     </header>
@@ -265,12 +340,11 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
       <CharacterTextEditor v-model="description" label="Descrição do cartão" :disabled="busy" />
       </template>
       </section>
-      <Teleport :to="sheetWindowTarget" :disabled="!sheetWindowTarget">
-        <section v-show="sheetWindowTarget || tab === 'sheet'" aria-label="Ficha"
-          :role="sheetWindowTarget ? undefined : 'tabpanel'" :class="{ 'sheet-window': sheetWindowTarget }">
-          <h1 v-if="sheetWindowTarget">{{ name.trim() || 'Ficha do personagem' }}</h1>
+        <section v-show="tab === 'sheet'" role="tabpanel" aria-label="Ficha">
           <div :inert="!!sheetWindowTarget && !!currentChoice">
-          <CharacterSheetEditor v-if="open" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :click-choices="clickChoices" :read-only="readOnly" :disabled="busy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
+          <CharacterSheetModels v-if="open && !readOnly" :key="character?.id" :sheet="sheet" :background-for="pageBackground"
+            :disabled="busy || pendingImages.size > 0" @busy="modelBusy = $event" @import="applySheetModel" />
+          <CharacterSheetEditor v-if="open" :key="sheetRevision" ref="sheetEditor" v-model="sheet" :background-for="pageBackground" :click-macros="clickMacros" :click-choices="clickChoices" :read-only="readOnly" :damage-ready="damageReady" :technique-busy="techniqueBusy" @technique-roll="rollTechnique" :disabled="busy || modelBusy" @background="selectPageImage" @remove-background="removePageUpload" @trigger="runMacro" />
           </div>
           <div v-if="sheetWindowTarget && currentChoice" class="detached-macro-choice" role="dialog"
             :aria-label="currentChoice.label" aria-modal="true" @keydown.esc.stop="cancelChoice">
@@ -280,21 +354,19 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
             </div>
           </div>
           <p v-if="macroStatus" role="status">{{ macroStatus }}</p>
-          <p v-if="sheetWindowTarget && (localError || error)" role="alert" class="character-error">{{ localError || error }}</p>
         </section>
-      </Teleport>
-      <p v-if="tab === 'sheet' && sheetWindowTarget">A ficha está aberta em outra janela.</p>
       <section v-if="!readOnly" v-show="tab === 'notes'" role="tabpanel" aria-label="Anotações">
         <CharacterTextEditor v-model="notes" label="Anotações" :disabled="busy" />
       </section>
       <section v-if="!readOnly" v-show="tab === 'settings'" role="tabpanel" aria-label="Configurações da ficha">
-        <CharacterSheetMacros v-if="open" ref="macroEditor" :model-value="sheet.macros ?? []" :fields="macroFields" :disabled="busy"
+        <CharacterSheetMacros v-if="open" :key="sheetRevision" ref="macroEditor" :model-value="sheet.macros ?? []" :fields="macroFields" :disabled="busy || modelBusy"
           @update:model-value="sheet={...sheet,macros:$event}" />
       </section>
       <p v-if="localError || error" role="alert" class="character-error">{{ localError || error }}</p>
-      <div class="modal-actions"><button type="button" class="text-button" :disabled="busy" @click="emit('close')">{{ readOnly ? 'Fechar' : 'Cancelar' }}</button><button v-if="!readOnly" class="primary" :disabled="busy">{{ character ? 'Salvar personagem' : 'Criar personagem' }}</button></div>
+      <div class="modal-actions"><button type="button" class="text-button" :disabled="busy" @click="emit('close')">{{ readOnly ? 'Fechar' : 'Cancelar' }}</button><button v-if="!readOnly" class="primary" :disabled="busy || modelBusy">{{ character ? 'Salvar personagem' : 'Criar personagem' }}</button></div>
     </form>
-  </q-card-section></q-card></q-dialog>
+  </q-card-section>
+  </Teleport>
   <q-dialog :model-value="!!currentChoice && !sheetWindowTarget" @update:model-value="value=>!value && !sheetWindowTarget && cancelChoice()">
     <q-card v-if="currentChoice" class="modal" :aria-label="currentChoice.label"><q-card-section>
       <MacroChoicePrompt :key="choicePath.length" :choice="currentChoice" :can-go-back="choicePath.length>1"
@@ -311,8 +383,8 @@ onBeforeUnmount(()=>{closeSheetWindow();releasePages();for(const kind of kinds)r
 .sheet-window-button { display:grid; place-items:center; }
 .sheet-window-button:hover { background:#ffffff12; border-radius:8px; }
 .sheet-window { padding:clamp(12px,3vw,32px); }
-.sheet-window h1 { font-size:24px; line-height:1.3; margin-bottom:16px; }
-.sheet-window :deep(.sheet-viewport) { max-height:calc(100dvh - 190px); min-height:180px; }
+.character-dialog-header h2 { font-size:24px; line-height:1.3; margin:12px 0 22px; }
+.sheet-window :deep(.sheet-viewport) { max-height:calc(100dvh - 300px); min-height:180px; }
 
 .character-tabs{margin-bottom:20px;border-bottom:1px solid #59436a;color:#d8c0ed}.character-tabs :deep(.q-tab){font-size:13px;padding:0 12px}.character-tabs :deep(.q-tab--active){color:#e4c7ff}.character-editor textarea{display:block;width:100%;min-height:180px;resize:vertical;padding:12px;border:1px solid #59436a;border-radius:8px;background:#17111e;color:#eadff3;font:inherit;line-height:1.7;margin-top:8px}.character-editor textarea:focus{outline:2px solid #b48ce9;outline-offset:2px}
 

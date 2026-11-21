@@ -1,6 +1,7 @@
 import type { SheetMacro } from './sheet-macros'
 
 export const MAX_SHEET_PAGES = 5
+export const MAX_SHEET_FIELDS = 120
 const FIRST_SHEET_PAGE = '00000000-0000-4000-8000-000000000001'
 
 export type FieldType = 'text' | 'textarea' | 'number' | 'bar' | 'select' | 'radio' | 'checkbox'
@@ -13,7 +14,11 @@ export type SheetPage = {
   id:string; width:number; height:number; fields:SheetField[]
   backgroundUrl?:string | null; removeBackground?:boolean
 }
-export type CharacterSheet = {version:2; pages:SheetPage[]; macros?:SheetMacro[]}
+export type Technique = Record<'name'|'level'|'element'|'cost'|'range'|'effect'|'attribute', string>
+export type CharacterSheet = {
+  version:2; pages:SheetPage[]; macros?:SheetMacro[]
+  techniques?:{attributes:Record<string,string>; rows:Technique[]}
+}
 type LegacySheet = {
   version:1; width:number; height:number
   fields:Omit<SheetField,'height'|'highlight'|'hideLabel'|'tokenShortcut'|'maximum'|'options'>[]

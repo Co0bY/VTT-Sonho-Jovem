@@ -9,6 +9,8 @@ import { layer, bounds, normalizeRotation } from './layers'
 import { imageSize } from 'image-size'
 import { MAX_SHEET_BYTES, sheetPageParts } from './character-sheet'
 import { Characters, type CharacterFiles } from './characters'
+import { SheetModels } from './sheet-models'
+import { systemEmail } from './shounens-dream-sheet'
 import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express'
 import { Mailer } from './mailer'
 import { position, rollDice, rollDiceGroups, integer } from './tabletop-rules'
@@ -48,7 +50,7 @@ class Accounts {
     if (++entry.count > 30) throw new HttpException('Muitas tentativas. Aguarde 15 minutos.', 429)
   }
   async user(req: Request) {
-    const result = await this.db.pool.query(`SELECT u.id, u.name, u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()`, [digest(sessionToken(req))])
+    const result = await this.db.pool.query(`SELECT u.id, u.name, u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND NOT u.is_system`, [digest(sessionToken(req))])
     if (!result.rows[0]) throw new UnauthorizedException('Entre na sua conta para continuar.')
     return result.rows[0] as { id: string; name: string; email: string }
   }
@@ -61,14 +63,40 @@ class Accounts {
 }
 @Controller()
 class ApiController {
-  constructor(private readonly accounts: Accounts, private readonly db: Database, private readonly mailer: Mailer, private readonly scenes: Scenes, private readonly storage: Storage, private readonly characters:Characters) {}
+  constructor(private readonly accounts: Accounts, private readonly db: Database, private readonly mailer: Mailer, private readonly scenes: Scenes, private readonly storage: Storage, private readonly characters:Characters, private readonly sheetModels: SheetModels) {}
   @Get('health') async health() { await this.db.pool.query('SELECT 1'); return { status: 'ok', database: 'up' } }
   @Get('auth/me') async me(@Req() req: Request, @Res({ passthrough: true }) res: Response) { res.setHeader('Cache-Control', 'no-store'); return this.accounts.user(req) }
+  @Get('modelos-ficha') async listSheetModels(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store')
+    return this.sheetModels.list((await this.accounts.user(req)).id)
+  }
+  @Post('modelos-ficha')
+  @UseInterceptors(FileFieldsInterceptor(sheetPageParts.map(name => ({ name, maxCount: 1 })), {
+    limits: { fileSize: MAX_IMAGE_BYTES, files: sheetPageParts.length, fields: 3, fieldSize: MAX_SHEET_BYTES },
+  }))
+  async createSheetModel(@Req() req: Request, @Body() body: Record<string, unknown>, @UploadedFiles() files?: CharacterFiles) {
+    this.accounts.mutation(req)
+    return this.sheetModels.create((await this.accounts.user(req)).id, body, files)
+  }
+  @Get('modelos-ficha/:id') async sheetModel(@Req() req: Request, @Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    res.setHeader('Cache-Control', 'no-store')
+    return this.sheetModels.detail((await this.accounts.user(req)).id, id)
+  }
+  @Get('modelos-ficha/:id/fundos/:pageId')
+  async sheetModelBackground(@Req() req: Request, @Param('id') id: string, @Param('pageId') pageId: string, @Res({ passthrough: true }) res: Response) {
+    const { filename, file } = await this.sheetModels.background((await this.accounts.user(req)).id, id, pageId)
+    const extension = filename.split('.').pop()
+    res.setHeader('Content-Type', extension === 'jpg' ? 'image/jpeg' : `image/${extension}`)
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    return new StreamableFile(file.createReadStream())
+  }
   @Post('auth/register') async register(@Body() body: unknown, @Req() req: Request) {
     this.accounts.mutation(req, true)
     const name = field(body, 'name', 2, 80)
     const email = field(body, 'email', 3, 254).toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new BadRequestException('Informe um e-mail válido.')
+    if (email === systemEmail) throw new ConflictException('Este e-mail já está cadastrado. Entre na sua conta.')
     const invitation = body && typeof body === 'object' ? (body as Record<string, unknown>).invitation : undefined
     const client = await this.db.pool.connect()
     try {
@@ -92,7 +120,7 @@ class ApiController {
     const client = await this.db.pool.connect()
     try {
       await client.query('BEGIN')
-      const { rows } = await client.query('SELECT id FROM users WHERE email=$1 AND password_hash IS NOT NULL FOR UPDATE', [email])
+      const { rows } = await client.query('SELECT id FROM users WHERE email=$1 AND password_hash IS NOT NULL AND NOT is_system FOR UPDATE', [email])
       if (rows[0]) {
         const token = randomBytes(32).toString('hex')
         await client.query(`INSERT INTO password_reset_tokens VALUES($1,$2,now()+interval '1 hour')
@@ -128,7 +156,7 @@ class ApiController {
       // DELETE serializes concurrent consumption: exactly one request obtains the token.
       const { rows } = await client.query(`DELETE FROM ${table} WHERE token_hash=$1 AND expires_at>now() RETURNING user_id`, [digest(token)])
       if (!rows[0]) throw new BadRequestException(reset ? 'Link inválido, expirado ou já utilizado. Solicite uma nova redefinição de senha.' : 'Link inválido, expirado ou já utilizado. Cadastre seu nome e e-mail novamente para receber outro link.')
-      const updated = await client.query(`UPDATE users SET password_hash=$1 WHERE id=$2 AND password_hash IS ${reset ? 'NOT ' : ''}NULL RETURNING id`, [`${salt}:${hash.toString('hex')}`, rows[0].user_id])
+      const updated = await client.query(`UPDATE users SET password_hash=$1 WHERE id=$2 AND NOT is_system AND password_hash IS ${reset ? 'NOT ' : ''}NULL RETURNING id`, [`${salt}:${hash.toString('hex')}`, rows[0].user_id])
       if (!updated.rowCount) throw new BadRequestException('Esta conta já foi ativada. Entre com sua senha.')
       await client.query('DELETE FROM sessions WHERE user_id=$1', [rows[0].user_id])
       await client.query('COMMIT')
@@ -140,7 +168,7 @@ class ApiController {
     this.accounts.mutation(req, true)
     const email = field(body, 'email', 3, 254).toLowerCase()
     const password = field(body, 'password', 1, 128, false)
-    const { rows } = await this.db.pool.query('SELECT * FROM users WHERE email=$1', [email])
+    const { rows } = await this.db.pool.query('SELECT * FROM users WHERE email=$1 AND NOT is_system', [email])
     const user = rows[0]
     const [salt, expected] = (user?.password_hash || `${'0'.repeat(32)}:${'0'.repeat(128)}`).split(':')
     const actual = await derive(password, salt, 64) as Buffer
@@ -516,12 +544,13 @@ class ApiController {
     const command = literal===true ? null : /^\/(?:roll|r)\s+(.+)$/i.exec(content)
     if (literal!==true && content.startsWith('/') && !command) throw new BadRequestException('Comando desconhecido. Use /roll 1d20 ou envie uma mensagem.')
     const roll = dice!==undefined ? rollDiceGroups(dice) : command ? rollDice(command[1]) : null
+    const caption = roll && Object.hasOwn(body as object, 'caption') ? field(body, 'caption', 1, 2000) : content
     // Keep message IDs in commit order within a campaign so polling cannot skip a concurrent insert.
     const { rows } = await this.db.pool.query(`
       WITH campaign AS MATERIALIZED (SELECT id FROM campaigns WHERE id=$1 FOR NO KEY UPDATE)
       INSERT INTO tabletop_messages(campaign_id,user_id,content,roll)
-      SELECT id,$2,$3,$4 FROM campaign RETURNING id::text`,
-    [id, access.user.id, content, roll ? JSON.stringify(roll) : null])
+      SELECT id,$2,$3,$4 FROM campaign RETURNING id::text, roll`,
+    [id, access.user.id, caption, roll ? JSON.stringify(roll) : null])
     if (!rows.length) throw new NotFoundException('Mesa não encontrada.')
     return rows[0]
   }
@@ -545,5 +574,5 @@ class ApiController {
     return { campaignId: rows[0].id }
   }
 }
-@Module({ controllers: [ApiController], providers: [Database, Accounts, Mailer, Scenes, Storage, Characters] })
+@Module({ controllers: [ApiController], providers: [Database, Accounts, Mailer, Scenes, Storage, Characters, SheetModels] })
 export class AppModule {}

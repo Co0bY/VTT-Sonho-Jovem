@@ -119,10 +119,6 @@ export class Characters {
           if(backgroundFile===oldBackgrounds.get(page.id))oldBackgrounds.delete(page.id)
           return {...page,backgroundFile}
         })}
-        // Keep data from existing sheets whose technique editor is not part of this build.
-        if (previous?.sheet.version === 2 && previous.sheet.techniques !== undefined) {
-          savedSheet.techniques = previous.sheet.techniques
-        }
         background=null
         for(const name of oldBackgrounds.values())old.push({category:'outros',name})
       }

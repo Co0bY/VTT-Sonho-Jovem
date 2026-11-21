@@ -2,13 +2,14 @@
 import FilterSelect from './FilterSelect.vue'
 import { selectOptions } from '../tabletop/select-options'
 import { computed, nextTick, ref, watch } from 'vue'
-import type { CharacterSheet, FieldType, SheetField, SheetPage } from '../tabletop/character-sheet'
+import type { CharacterSheet, FieldType, SheetField, SheetPage, Technique } from '../tabletop/character-sheet'
+import { techniqueCost } from '../tabletop/sheet-techniques'
 import { usesMacroField, type MacroEvent } from '../tabletop/sheet-macros'
-import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
+import { emptyPage, fieldDefaults, hasOptions, MAX_SHEET_FIELDS, MAX_SHEET_PAGES, sheetError } from '../tabletop/character-sheet'
 
-const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;readOnly?:boolean;clickMacros:ReadonlySet<string>;clickChoices?:ReadonlySet<string>}>()
+const props=defineProps<{modelValue:CharacterSheet;backgroundFor:(id:string)=>string|null|undefined;disabled:boolean;readOnly?:boolean;clickMacros:ReadonlySet<string>;clickChoices?:ReadonlySet<string>;damageReady:ReadonlySet<string>;techniqueBusy:boolean}>()
 const emit=defineEmits<{
-  'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string];trigger:[fieldId:string,event:MacroEvent,value:string]
+  'techniqueRoll':[row:Technique,action:'attack'|'damage'];'update:modelValue':[sheet:CharacterSheet];background:[id:string,event:Event];removeBackground:[id:string];trigger:[fieldId:string,event:MacroEvent,value:string]
 }>()
 const editing=ref(false)
 const placing=ref(false)
@@ -33,6 +34,15 @@ const viewport=ref<HTMLElement>()
 const backgroundError=ref(false)
 const page=computed(()=>props.modelValue.pages[pageIndex.value]!)
 const background=computed(()=>props.backgroundFor(page.value.id))
+const techniquesByAttribute=computed(()=>new Map(props.modelValue.techniques?.rows.map(row=>[row.attribute,row])))
+function triggerTechnique(id:string,action:'attack'|'damage'){
+  const row=techniquesByAttribute.value.get(id)
+  if(row)emit('techniqueRoll',row,action)
+}
+const techniqueCosts=computed(()=>{
+  const fields=new Map(page.value.fields.map(field=>[field.id,field.value]))
+  return new Map(props.modelValue.techniques?.rows.map(row=>[row.cost,techniqueCost(fields.get(row.level)??'')]))
+})
 const selected=computed(()=>page.value.fields.find(field=>field.id===selectedId.value))
 const fieldCount=computed(()=>props.modelValue.pages.reduce((count,item)=>count+item.fields.length,0))
 const validation=computed(()=>sheetError(props.modelValue))
@@ -61,7 +71,7 @@ function addPage(){
   activatePage(pages.length)
 }
 function addField(rect:Rect){
-  if(fieldCount.value>=100)return
+  if(fieldCount.value>=MAX_SHEET_FIELDS)return
   const references=new Set(props.modelValue.pages.flatMap(item=>item.fields.map(field=>field.reference)))
   let index=1
   while(references.has(`campo_${index}`))index++
@@ -137,9 +147,13 @@ function selectField(id:string){
   board.value?.querySelector<HTMLElement>(`[data-sheet-field="${id}"]`)?.scrollIntoView({block:'nearest',inline:'nearest'})
 }
 function removeField(){
+  const techniques=props.modelValue.techniques
+  const rows=techniques?.rows.filter(row=>!Object.values(row).includes(selectedId.value))
+  const attributes=Object.fromEntries(Object.entries(techniques?.attributes??{}).filter(([,id])=>id!==selectedId.value))
   emit('update:modelValue',{
     ...props.modelValue,
     pages:props.modelValue.pages.map(item=>item.id===page.value.id?{...item,fields:item.fields.filter(field=>field.id!==selectedId.value)}:item),
+    techniques:rows?.length&&Object.keys(attributes).length?{rows,attributes}:undefined,
     macros:props.modelValue.macros?.filter(rule=>rule.fieldId!==selectedId.value&&!usesMacroField(rule.action,selectedId.value)),
   })
   selectedId.value=''
@@ -231,15 +245,16 @@ function stopValueEditing(event:KeyboardEvent){
   valueModeButton.value?.focus()
 }
 function trigger(field:SheetField,event:Event,kind:MacroEvent){
-  const target=event.target
-  if(!(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))return
-  if(event instanceof KeyboardEvent){
-    if(event.isComposing)return
-    if(target instanceof HTMLInputElement&&target.type==='text')event.preventDefault()
-    if(event.repeat)return
+  const target=event.target as HTMLInputElement|HTMLTextAreaElement|null
+  if(!target?.matches('input, textarea'))return
+  if(event.type==='keydown'){
+    const key=event as KeyboardEvent
+    if(key.isComposing)return
+    if(target.matches('input[type="text"], input:not([type])'))event.preventDefault()
+    if(key.repeat)return
   }
   if(editing.value||props.disabled||props.readOnly)return
-  const value=target instanceof HTMLInputElement&&target.type==='checkbox'?String(target.checked):target.value
+  const value=target.matches('input[type="checkbox"]')?String((target as HTMLInputElement).checked):target.value
   emit('trigger',field.id,kind,value)
 }
 function finishEditing(){editing.value=false;editingValue.value=false;drag=undefined;cancelPlacement()}
@@ -266,7 +281,7 @@ defineExpose({finishEditing})
           @change="backgroundError=false;emit('background',page.id,$event)">
       </label>
       <button v-if="background" type="button" :disabled="disabled" @click="removeBackground">Remover fundo da ficha</button>
-      <button type="button" :disabled="disabled || fieldCount>=100" :aria-pressed="placing" @click="placing ? cancelPlacement() : startPlacement()">{{ placing ? 'Cancelar adição' : '+ Adicionar campo' }}</button>
+      <button type="button" :disabled="disabled || fieldCount>=MAX_SHEET_FIELDS" :aria-pressed="placing" @click="placing ? cancelPlacement() : startPlacement()">{{ placing ? 'Cancelar adição' : '+ Adicionar campo' }}</button>
     </div>
     <p v-if="editing" class="sheet-instruction" aria-live="polite">{{ placing
       ? 'Clique ou arraste sobre a ficha para marcar a área do novo campo. Enter insere com o tamanho padrão.'
@@ -291,11 +306,12 @@ defineExpose({finishEditing})
               @click="!editing && !disabled && !readOnly && clickChoices?.has(field.id) && emit('trigger',field.id,'clique',field.value)">
               <span v-if="!field.hideLabel && field.type==='radio'" class="field-label">{{ field.label }}</span>
               <label v-else-if="!field.hideLabel" class="field-label" :for="`sheet-value-${field.id}`">{{ field.label }}</label>
-              <input v-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
+              <output v-if="techniqueCosts.has(field.id)" :id="`sheet-value-${field.id}`" class="plain-control" :aria-label="field.label" :data-reference="field.reference">{{ techniqueCosts.get(field.id) }}</output>
+              <input v-else-if="field.type==='text'||field.type==='number'" :id="`sheet-value-${field.id}`" class="plain-control" :class="{ 'number-control':field.type==='number' }"
                 :aria-label="field.label" :value="field.value" :disabled="disabled || readOnly" :readonly="field.readOnly" :inputmode="field.type==='number'?'decimal':'text'"
                 :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLInputElement).value})">
               <textarea v-else-if="field.type==='textarea'" :id="`sheet-value-${field.id}`" class="plain-control"
-                :aria-label="field.label" :value="field.value" :disabled="disabled" :readonly="field.readOnly"
+                :aria-label="field.label" :value="field.value" :disabled="disabled || readOnly" :readonly="field.readOnly"
                 :data-reference="field.reference" maxlength="1000" @input="updateField(field.id,{value:($event.target as HTMLTextAreaElement).value})" />
               <div v-else-if="field.type==='bar'" class="bar-control">
                 <input :id="`sheet-value-${field.id}`" type="range" min="0" :max="field.maximum" :value="field.value"
@@ -304,8 +320,8 @@ defineExpose({finishEditing})
                 <span>{{ field.value }} / {{ field.maximum }}</span>
               </div>
               <FilterSelect v-else-if="field.type==='select'" :id="`sheet-value-${field.id}`"
-                :aria-label="field.label" :model-value="field.value"
-                :options="[{value:'',label:'Selecione'}, ...field.options.map(option=>({value:option,label:option}))]"
+                :aria-label="field.label" :data-reference="field.reference" :model-value="field.value"
+                :options="[{value:'',label:techniquesByAttribute.has(field.id)?'Selecione o atributo':'Selecione'}, ...field.options.map(option=>({value:option,label:option}))]"
                 sheet :disabled="disabled || readOnly || field.readOnly" @update:model-value="changeSheetSelection(field,$event)"
                 @confirm="!editing && emit('trigger',field.id,'enter',field.value)" />
               <div v-else-if="field.type==='radio'" class="radio-options" role="radiogroup" :aria-label="field.label">
@@ -317,10 +333,19 @@ defineExpose({finishEditing})
               <input v-else :id="`sheet-value-${field.id}`" type="checkbox" :aria-label="field.label" :checked="field.value==='true'"
                 :disabled="disabled || readOnly || field.readOnly" @change="updateField(field.id,{value:String(($event.target as HTMLInputElement).checked)})">
             </div>
+            <div v-if="!readOnly && !editing && techniquesByAttribute.has(field.id)" class="technique-actions">
+              <button type="button" :disabled="disabled || techniqueBusy" :aria-label="`Rolar ataque · ${field.label}`" @click="triggerTechnique(field.id,'attack')">Rolar ataque</button>
+              <button type="button" :disabled="disabled || techniqueBusy || !damageReady.has(field.id)" :aria-label="`Rolar dano · ${field.label}`" @click="triggerTechnique(field.id,'damage')">Rolar dano</button>
+            </div>
             <button v-if="!readOnly && !editing && clickMacros.has(field.id)" type="button" class="macro-trigger"
               :class="{ 'macro-trigger-left':field.x>=28 && field.x+field.width+28>page.width }"
-              :disabled="disabled || readOnly" :aria-label="`Executar macro de ${field.label}`" :title="`Executar macro de ${field.label}`"
-              @click="emit('trigger',field.id,'clique',field.value)"><span aria-hidden="true">▶</span></button>
+              :disabled="disabled" :aria-label="`Executar macro de ${field.label}`" :title="`Executar macro de ${field.label}`"
+              @click="emit('trigger',field.id,'clique',field.value)">
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2 21 7v10l-9 5-9-5V7l9-5Zm0 0L7 15m5-13 5 13M3 7l4 8-4 2m18-10-4 8 4 2M7 15h10l-5 7-5-7Z" />
+              </svg>
+            </button>
             <template v-if="editing">
               <button v-if="!(editingValue && selectedId===field.id)" type="button" class="move-handle" :disabled="disabled || placing" :aria-label="`Mover campo ${field.label}`"
                 @focus="selectedId=field.id" @click="selectedId=field.id" @keydown="keyboard($event,field)"
@@ -434,6 +459,11 @@ defineExpose({finishEditing})
 .bar-control input[type=range]::-moz-range-thumb { width:10px; height:10px; border:2px solid #f1e6fc; border-radius:50%; background:#68408c; }
 .radio-options { overflow:auto; scrollbar-width:thin; }
 .radio-options label { display:flex; align-items:center; }
+.technique-actions {
+  position:absolute; top:0; left:calc(100% + 8px); display:flex; gap:6px; height:100%; white-space:nowrap;
+}
+.technique-actions button { padding:0 8px; font-size:12px; background:#4e3166; color:#fff; }
+.technique-actions button:disabled { opacity:.65; }
 .sheet-field .macro-trigger {
   position:absolute; top:50%; left:calc(100% + 4px); z-index:2; transform:translateY(-50%);
   width:24px; height:24px; display:grid; place-items:center; padding:0; font-size:11px; line-height:1;
