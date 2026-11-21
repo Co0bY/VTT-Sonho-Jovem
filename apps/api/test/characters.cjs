@@ -107,6 +107,16 @@ async function main(){
   update.append('sheet',JSON.stringify({...sheetV2,macros:invalid}))
   await request(`${base}/characters/${empty.id}/settings`,400,update,1)
  }
+ const leaf={kind:'rolar',groups:[{count:null,countFieldId:pages[0].fields[0].id,sides:8,reduction:'somar'}],combine:null}
+ const nested=(depth,action=leaf)=>depth===0?action:{kind:'escolher',label:`Seletor ${depth}`,options:[
+  {label:'Avançar',action:nested(depth-1,action)},{label:'Encerrar',action:{kind:'chat',text:'Fim'}},
+ ]}
+ for(const [action,status] of [[nested(5),201],[nested(17),400],[nested(1,{...leaf,groups:[{...leaf.groups[0],countFieldId:macro.fieldId}] }),400]]){
+  const flowForm=form('Macro com escolhas',player)
+  flowForm.append('sheet',JSON.stringify({...sheetV2,macros:[{...macro,action}]}))
+  const result=await request(`${base}/characters/${empty.id}/settings`,status,flowForm,1)
+  if(status===201)assert.deepEqual(result.sheet.macros[0].action,action)
+ }
  const groups=[{count:3,sides:6,reduction:'subtrair'},{count:2,sides:8,reduction:'multiplicar'},{count:2,sides:20,reduction:'somar'}]
  await request(`${base}/messages`,201,{content:'/roll 3d6, 2d8, 2d20',dice:{groups,combine:null}},1)
  const separate=(await request(base,200,undefined,1)).messages.at(-1).roll
@@ -245,7 +255,7 @@ async function main(){
  await asset(updated.sheet_background_url,404,1) // Visible tokens never expose the sheet background.
  await asset(updated.appearance_url,200,1,portrait) // A visible map token can expose its appearance to participants.
  await request(`${base}/characters/${hero.id}/settings`,403,form('Invasão',player),1)
- const privateForm=form('Privado',owner,portrait,tokenImage);privateForm.append('sheet',new Blob([image(80,110)],{type:'image/png'}),'ficha.png')
+ const privateForm=form('Privado',owner,portrait,tokenImage);privateForm.append('notes','Conteúdo privado');privateForm.append('sheet',new Blob([image(80,110)],{type:'image/png'}),'ficha.png')
  const privateCharacter=await request(`${base}/characters`,201,privateForm)
  await asset(privateCharacter.token_url,404,1)
  const subscription=await request(`${base}/presentations`,200,undefined,1)
@@ -288,9 +298,48 @@ async function main(){
  assert.ok((await request(base,200)).characters.some(c=>c.id===legacy.character_id))
  await request(`${base}/tokens/${legacy.id}/remove`,201,{})
  assert.ok((await request(base,200)).characters.some(c=>c.id===legacy.character_id))
+ const folder=await request(`${base}/character-folders`,201,{name:'Adversários'})
+ await request(`${base}/character-folders`,409,{name:' adversários '})
+ await request(`${base}/character-folders`,403,{name:'Proibida'},1)
+ const movePath=`${base}/characters/${privateCharacter.id}/folder`
+ await request(movePath,403,{folder_id:folder.id},1)
+ await request(movePath,404,{folder_id:randomUUID()})
+ await request(movePath,201,{folder_id:folder.id})
+ let guest=await request(base,200,undefined,1)
+ assert.ok(!guest.character_folders.some(f=>f.id===folder.id))
+ assert.ok(!guest.characters.some(c=>c.id===privateCharacter.id))
+ assert.ok(guest.tokens.some(t=>t.character_id===privateCharacter.id),'A visibilidade da ficha não esconde o token no mapa.')
+ const audience=form('Personagem com acesso')
+ audience.append('visible_to',JSON.stringify([player]))
+ await request(`${base}/characters/${privateCharacter.id}/settings`,201,audience)
+ const invalidAudience=form('Personagem com acesso')
+ invalidAudience.append('visible_to',JSON.stringify([outsider]))
+ await request(`${base}/characters/${privateCharacter.id}/settings`,400,invalidAudience)
+ const ownerCharacterAudience=form('Controle sem gerir acesso',player)
+ ownerCharacterAudience.append('visible_to','[]')
+ await request(`${base}/characters/${empty.id}/settings`,403,ownerCharacterAudience,1)
+ await request(`${base}/characters/${privateCharacter.id}/settings`,403,form('Tentativa de editar',owner),1)
+ guest=await request(base,200,undefined,1)
+ const shared=guest.characters.find(c=>c.id===privateCharacter.id)
+ assert.equal(shared.folder_id,folder.id)
+ assert.equal(shared.notes,'')
+ assert.ok(!('visible_to' in shared))
+ assert.ok(guest.character_folders.some(f=>f.id===folder.id))
+ await asset(shared.sheet_background_url,200,1,image(80,110))
+ await request(`${base}/character-folders/${folder.id}/remove`,403,{},1)
+ await request(`${base}/character-folders/${folder.id}/remove`,201,{})
+ assert.equal((await request(base,200,undefined,1)).characters.find(c=>c.id===privateCharacter.id).folder_id,null)
+ const revoked=form('Personagem com acesso revogado')
+ revoked.append('visible_to','[]')
+ await request(`${base}/characters/${privateCharacter.id}/settings`,201,revoked)
+ guest=await request(base,200,undefined,1)
+ assert.ok(!guest.characters.some(c=>c.id===privateCharacter.id))
+ assert.ok(guest.tokens.some(t=>t.character_id===privateCharacter.id))
+ await asset(shared.sheet_background_url,404,1)
+ assert.ok((await request(base,200)).characters.some(c=>c.id===privateCharacter.id),'Mestre sempre vê a ficha.')
  const missing=await db.query('SELECT t.id FROM tabletop_tokens t LEFT JOIN tabletop_characters c ON c.id=t.character_id AND c.campaign_id=t.campaign_id WHERE t.campaign_id=$1 AND c.id IS NULL',[campaign])
  assert.equal(missing.rowCount,0)
- console.log('PASS personagens independentes de cenários, imagens distintas, múltiplas presenças, edição sincronizada, permissões, sigilo de imagens, upload/limpeza, cenários vazios e compatibilidade de tokens anteriores.')
+ console.log('PASS personagens independentes de cenários, imagens distintas, múltiplas presenças, edição sincronizada, permissões, sigilo de imagens, upload/limpeza, cenários vazios, compatibilidade de tokens anteriores, pastas e visibilidade independente do mapa.')
 }
 main().catch(error=>{console.error(error);process.exitCode=1}).finally(async()=>{
  try{await db.query('DELETE FROM campaigns WHERE id=ANY($1)',[[campaign,other]]);await db.query('DELETE FROM users WHERE id=ANY($1)',[[owner,player,outsider]])}finally{await db.end();server?.kill('SIGTERM');if(root)await rm(root,{recursive:true,force:true})}
