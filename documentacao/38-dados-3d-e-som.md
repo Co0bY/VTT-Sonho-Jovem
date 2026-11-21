@@ -21,3 +21,10 @@ O identificador da mensagem funciona como cursor. `GET /campaigns/:id/tabletop/m
 A atualização periódica usa `GET /campaigns/:id/tabletop?after=ID` para receber as mensagens posteriores e mantê-las junto das páginas já carregadas. A API serializa os envios por campanha antes de alocar o ID para manter a ordem observável pelo cursor. A fila de animação recebe somente as mensagens novas dessa sincronização. Se você estiver no histórico, novas mensagens são acrescentadas ao fim sem interromper a leitura.
 
 Para verificar no navegador, abra uma mesa com mais de 100 mensagens. Confira as 50 mais recentes ao abrir, carregue duas páginas subindo ao topo e envie uma mensagem em outra sessão enquanto lê. Depois, recarregue e confirme que o chat volta às 50 mais recentes. O cenário automatizado usa `pnpm --filter @vtt/api test:browser`.
+
+## Validação na retomada
+
+- `docker compose up -d --build` iniciou PostgreSQL e MailHog. Com `pnpm dev` no Ubuntu, a interface respondeu em `http://127.0.0.1:9000` e `/api/health` retornou `database: up`.
+- `pnpm build`, `pnpm --filter @vtt/web typecheck`, os 22 testes de `pnpm --filter @vtt/web test` e `pnpm --filter @vtt/api test:characters` passaram.
+- `pnpm --filter @vtt/api test:browser` passou no Chromium. A suíte verificou Canvas, reprodução e silêncio, sincronização entre sessões e histórico sem animação. Com 125 mensagens de teste, verificou também a abertura com 50, a posição ao carregar páginas anteriores e receber uma mensagem nova, e o retorno a 50 após recarregar.
+- O Chromium deste Ubuntu precisou de `libnspr4`, `libnss3` e `libasound2t64`. Para a validação, extraí os pacotes em uma pasta temporária e usei `LD_LIBRARY_PATH` no comando de teste.
