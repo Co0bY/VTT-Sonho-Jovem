@@ -3,6 +3,9 @@ import FilterSelect from '../components/FilterSelect.vue'
 import { selectOptions } from '../tabletop/select-options'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import DiceRollOverlay from '../components/DiceRollOverlay.vue'
+import { newDiceBatches } from '../tabletop/dice-visuals'
+import { createDiceSound } from '../tabletop/dice-sound'
 import TabletopBoard from '../components/TabletopBoard.vue'
 import ScenesMenu from '../components/ScenesMenu.vue'
 import { macroMessage, reductions, type MacroAction, type MacroMessage } from '../tabletop/sheet-macros'
@@ -11,7 +14,7 @@ import CharacterCardDialog from '../components/CharacterCardDialog.vue'
 import { editorHtml } from '../tabletop/rich-text'
 import CharactersPanel from '../components/CharactersPanel.vue'
 import ImageTransformDialog from '../components/ImageTransformDialog.vue'
-import type { Tabletop, Tool, Token, Scene, Layer, Rect, Character, CharacterCard, Message } from '../tabletop/types'
+import type { ChatPage, Tabletop, Tool, Token, Scene, Layer, Rect, Character, CharacterCard, Message } from '../tabletop/types'
 import type { Point } from '../tabletop/geometry'
 const route = useRoute()
 const id = String(route.params.id)
@@ -20,6 +23,8 @@ const state = ref<Tabletop>(), loading = ref(true), busy = ref(false), error = r
 const tool = ref<Tool>('select'), selected = ref(''), zoom = ref(100), panel = ref('chat'), sidebar = ref(true)
 const board = ref<InstanceType<typeof TabletopBoard>>(), chatList = ref<HTMLElement>()
 const draft = ref('')
+const hasOlderMessages = ref(false), loadingOlderMessages = ref(false), historyError = ref(false)
+
 const presentationCard=ref<CharacterCard|null>(null),presentationError=ref('')
 const presentationQueue:CharacterCard[]=[]
 let presentationCursor:string|undefined
@@ -61,17 +66,84 @@ function report(e: unknown) {
   error.value = e instanceof Error ? e.message : 'Falha ao conectar com a mesa.'
   if (e instanceof ApiError && (e.status === 401 || e.status === 403)) { accessDenied.value = true; loginRequired.value = e.status === 401; state.value = undefined }
 }
+const diceSound=createDiceSound()
+const diceQueue:ReturnType<typeof newDiceBatches>=[]
+const activeDice=ref<(typeof diceQueue)[number]>()
+const diceMuted=ref(localStorage.getItem('vtt-dice-muted')==='true')
+function unlockDiceSound(){if(!diceMuted.value)diceSound.unlock()}
+function toggleDiceSound(){
+  diceMuted.value=!diceMuted.value
+  localStorage.setItem('vtt-dice-muted',String(diceMuted.value))
+  unlockDiceSound()
+}
+function nextDiceBatch(){
+  activeDice.value=diceQueue.shift()
+  if(activeDice.value&&!diceMuted.value)diceSound.play(activeDice.value.dice.length)
+}
+function dismissDice() {
+  if (activeDice.value) nextDiceBatch()
+}
+function scrollChatToEnd() {
+  const element = chatList.value
+  if (element) element.scrollTop = element.scrollHeight
+}
+
+async function loadOlderMessages() {
+  const first = state.value?.messages[0]
+  if (!first || !hasOlderMessages.value || loadingOlderMessages.value) return
+  loadingOlderMessages.value = true
+  historyError.value = false
+  try {
+    const history = await api<ChatPage>(`${endpoint}/messages?before=${first.id}`)
+    if (disposed || !state.value) return
+    const element = chatList.value
+    const anchor = element?.querySelector('.chat-message')
+    const top = anchor?.getBoundingClientRect().top
+    state.value.messages = [...history.messages, ...state.value.messages]
+    hasOlderMessages.value = history.hasOlderMessages
+    await nextTick()
+    if (element && element === chatList.value && anchor && top !== undefined) {
+      element.scrollTop += anchor.getBoundingClientRect().top - top
+    }
+  } catch (e) {
+    if (disposed) return
+    if (e instanceof ApiError && [401, 403].includes(e.status)) report(e)
+    else historyError.value = true
+  } finally {
+    loadingOlderMessages.value = false
+  }
+}
+
+function onChatScroll(event: Event) {
+  if ((event.currentTarget as HTMLElement).scrollTop <= 24 && !historyError.value) {
+    void loadOlderMessages()
+  }
+}
+
 async function refresh() {
   const requested = revision
-  const data = await api<Tabletop>(endpoint)
+  const previous = state.value?.messages
+  const cursor = previous?.at(-1)?.id ?? '0'
+  const data = await api<Tabletop>(previous ? `${endpoint}?after=${cursor}` : endpoint)
   if (disposed || requested !== revision) return
   const element = chatList.value
   const shouldScroll = !state.value || !element || element.scrollHeight - element.scrollTop - element.clientHeight < 90
   if (state.value?.scene.id && state.value.scene.id !== data.scene.id) {selected.value='';transformTarget.value=null}
+  diceQueue.push(...newDiceBatches(previous, data.messages))
+  if (previous && state.value) {
+    data.messages = data.messages.length ? [...state.value.messages, ...data.messages] : state.value.messages
+  } else {
+    hasOlderMessages.value = data.hasOlderMessages ?? false
+  }
+  if(!activeDice.value)nextDiceBatch()
   state.value = data
   if (characterDialog.value && characterTarget.value && !master.value) {
     const current = data.characters.find(character => character.id === characterTarget.value?.id)
     if (!current || current.owner_id !== characterTarget.value.owner_id) characterDialog.value = false
+  }
+  if (shouldScroll && element) {
+    await nextTick()
+    if (element === chatList.value) scrollChatToEnd()
   }
   const presentations=await api<{cursor:string;events:{id:string;card:CharacterCard}[]}>(`${endpoint}/presentations${presentationCursor===undefined?'':`?after=${presentationCursor}`}`)
   if(disposed||requested!==revision)return
@@ -79,7 +151,6 @@ async function refresh() {
   if(!master.value){for(const event of presentations.events)presentationQueue.push(event.card);if(!presentationCard.value&&presentationQueue.length)presentationCard.value=presentationQueue.shift()!}
   if(selected.value && selected.value!=='background'&&!data.tokens.some(t=>t.id===selected.value)&&!data.objects.some(object=>`object:${object.id}`===selected.value))selected.value=''
   if(transformTarget.value&&transformTarget.value.id!=='background'&&!data.objects.some(object=>object.id===transformTarget.value!.id))transformTarget.value=null
-  if (shouldScroll) { await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) }
 }
 async function poll() {
   if (disposed || accessDenied.value) return
@@ -134,7 +205,14 @@ async function sendMacro(message:MacroMessage){return api<Pick<Message,'roll'>>(
 async function rollFromToken(roll: { action: Extract<MacroAction, { kind: 'rolar' }>; value: string; fields: { id: string; value: string }[] }) {
   await action(async () => { await sendMacro(macroMessage(roll.action, roll.value, id => roll.fields.find(field => field.id === id)?.value)) })
 }
-async function send(content = draft.value) { if (!content.trim()) return; await action(async () => { await api(`${endpoint}/messages`, { content }); if (content === draft.value) draft.value = ''; await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) }) }
+async function send(content = draft.value) {
+  if (!content.trim()) return
+  const sent = await action(async () => {
+    await api(`${endpoint}/messages`, { content })
+    if (content === draft.value) draft.value = ''
+  })
+  if (sent) scrollChatToEnd()
+}
 async function createScene(settings: object) {
   let created: Scene | undefined
   const ok = await action(async () => { created = await api<Scene>(`${endpoint}/scenes`, settings) })
@@ -152,14 +230,24 @@ function editImage(targetId:string,rect:Rect){const object=state.value?.objects.
 async function transformImage(targetId:string,rect:Rect,targetLayer:Layer=editingLayer.value,sceneSize?:{width:number;height:number;cell_size:number}){return action(async()=>{const path=targetId==='background'?`${endpoint}/scenes/${state.value!.scene.id}/background/transform`:`${endpoint}/objects/${targetId}/transform`;await api(path,{...rect,...(targetId==='background'?{}:{layer:targetLayer}),...(sceneSize?{scene_width:sceneSize.width,scene_height:sceneSize.height,scene_cell_size:sceneSize.cell_size}:{})})})}
 async function addImage(){if(!objectFile.value)return;await action(async()=>{const data=new FormData();data.append('name',objectName.value);data.append('layer',editingLayer.value);data.append('image',objectFile.value!);await api(`${endpoint}/objects`,data);objectName.value='';objectFile.value=undefined;if(objectInput.value)objectInput.value.value=''})}
 watch(editingLayer,()=>{selected.value='';tool.value='select'},{flush:'sync'})
-watch(panel, async () => { if (panel.value === 'chat') { await nextTick(); chatList.value?.scrollTo({ top: chatList.value.scrollHeight }) } })
-onMounted(async () => { try { await refresh() } catch (e) { report(e) } finally { loading.value = false; if (!disposed && !accessDenied.value) timer = setTimeout(poll, 2000) } })
-onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(timer) })
+watch(chatList, scrollChatToEnd, { flush: 'post' })
+onMounted(async () => {
+  window.addEventListener('click',dismissDice,true)
+  window.addEventListener('pointerdown',unlockDiceSound)
+  window.addEventListener('keydown',unlockDiceSound)
+  try { await refresh() } catch (e) { report(e) } finally { loading.value = false; if (!disposed && !accessDenied.value) timer = setTimeout(poll, 2000) } })
+onBeforeUnmount(() => {
+  window.removeEventListener('click',dismissDice,true)
+  window.removeEventListener('pointerdown',unlockDiceSound)
+  window.removeEventListener('keydown',unlockDiceSound)
+  diceSound.close()
+  disposed = true; abort.abort(); if (timer) clearTimeout(timer) })
 </script>
 
 <template>
   <div class="tabletop-page">
-    <header class="table-header"><router-link to="/" class="table-back" aria-label="Voltar às minhas mesas">‹ <span>Minhas mesas</span></router-link><div class="table-title"><span class="table-logo">✦</span><div><h1>{{ state?.campaign.name || 'Mesa virtual' }}</h1><span>{{ state?.campaign.system || 'Sonho Jovem' }}</span></div></div><div class="table-header-right"><span v-if="state" class="table-role">{{ master ? 'Mestre' : 'Jogador' }}</span><button class="table-button" :aria-expanded="sidebar" aria-label="Mostrar ou ocultar painel da mesa" @click="sidebar = !sidebar">☷ <span>Painel</span></button></div></header>
+    <DiceRollOverlay v-if="activeDice" :key="activeDice.id" :dice="activeDice.dice" />
+    <header class="table-header"><router-link to="/" class="table-back" aria-label="Voltar às minhas mesas">‹ <span>Minhas mesas</span></router-link><div class="table-title"><span class="table-logo">✦</span><div><h1>{{ state?.campaign.name || 'Mesa virtual' }}</h1><span>{{ state?.campaign.system || 'Sonho Jovem' }}</span></div></div><div class="table-header-right"><button v-if="state" type="button" class="table-button" aria-label="Silenciar som dos dados" :aria-pressed="diceMuted" :title="diceMuted ? 'Ativar som dos dados' : 'Silenciar som dos dados'" @click="toggleDiceSound">{{ diceMuted ? '♪ ×' : '♪' }}</button><span v-if="state" class="table-role">{{ master ? 'Mestre' : 'Jogador' }}</span><button class="table-button" :aria-expanded="sidebar" aria-label="Mostrar ou ocultar painel da mesa" @click="sidebar = !sidebar">☷ <span>Painel</span></button></div></header>
     <div v-if="loading" class="table-loading" role="status">Preparando a mesa e reunindo as histórias…</div>
     <div v-else-if="!state" class="table-loading"><h2>{{ loginRequired ? 'Entre para acessar a mesa' : 'Não foi possível abrir a mesa' }}</h2><p role="alert">{{ error }}</p><a v-if="loginRequired" :href="loginLink" class="primary">Entrar na conta</a><router-link v-else to="/" class="primary">Voltar às minhas mesas</router-link></div>
     <template v-else>
@@ -177,7 +265,9 @@ onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(
           <div class="scene-controls"><span>{{ tool === 'measure' ? `Arraste entre centros · Alt: livre · 1 célula = ${state.scene.distance_per_cell} ${state.scene.distance_unit}` : tool === 'pan' ? 'Arraste o cenário para navegar' : master && (selected === 'background' || selected.startsWith('object:')) ? 'Cantos: proporção/grid · Alt: livre · Duplo clique: editar · Del: excluir' : 'Selecione um token · Arraste o fundo para navegar' }}</span><div><button aria-label="Diminuir zoom" @click="board?.zoomBy(0.8)">−</button><output aria-label="Zoom atual">{{ zoom }}%</output><button aria-label="Aumentar zoom" @click="board?.zoomBy(1.25)">+</button><button aria-label="Ajustar cenário à tela" title="Ajustar cenário à tela" @click="board?.center()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 12h10m-5-5v10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div></div>
         </section>
         <aside v-if="sidebar" class="table-panel"><nav class="panel-tabs" aria-label="Painéis da mesa"><button v-for="tab in tabs.filter(tab=>master || tab.id!=='layers')" :key="tab.id" :class="{ active: panel === tab.id }" :aria-pressed="panel === tab.id" :aria-label="tab.label" @click="panel = tab.id"><span>{{ tab.icon }}</span>{{ tab.label }}</button></nav>
-          <template v-if="panel === 'chat'"><div class="panel-heading"><h2>Chat da mesa</h2><span>HISTÓRICO COMPARTILHADO</span></div><div ref="chatList" class="chat-messages" role="log" aria-label="Mensagens da mesa" aria-live="polite"><div class="chat-welcome"><span>✦</span><strong>A história começa aqui</strong><p>Converse com seu grupo ou deixe os dados decidirem.</p></div><article v-for="message in state.messages" :key="message.id" class="chat-message" :class="{ 'own-message': message.user_id === state.user.id }"><header><strong>{{ message.author }}</strong><time :datetime="message.created_at">{{ new Date(message.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }}</time></header><p v-if="!message.roll || !/^\/(?:roll|r)\s/i.test(message.content)">{{ message.content }}</p><div v-if="message.roll" class="dice-result"><span>ROLAGEM · {{ message.roll.expression }}</span><template v-if="'groups' in message.roll">
+          <template v-if="panel === 'chat'"><div class="panel-heading"><h2>Chat da mesa</h2><span>HISTÓRICO COMPARTILHADO</span></div><div ref="chatList" class="chat-messages" role="log" aria-label="Mensagens da mesa" aria-live="polite" @scroll.passive="onChatScroll">
+          <button v-if="hasOlderMessages" type="button" class="table-button chat-history-button" :disabled="loadingOlderMessages" @click="loadOlderMessages">{{ loadingOlderMessages ? 'Carregando…' : historyError ? 'Tentar carregar novamente' : 'Carregar mensagens anteriores' }}</button>
+          <div v-else class="chat-welcome"><span>✦</span><strong>A história começa aqui</strong><p>Converse com seu grupo ou deixe os dados decidirem.</p></div><article v-for="message in state.messages" :key="message.id" class="chat-message" :class="{ 'own-message': message.user_id === state.user.id }"><header><strong>{{ message.author }}</strong><time :datetime="message.created_at">{{ new Date(message.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }}</time></header><p v-if="!message.roll || !/^\/(?:roll|r)\s/i.test(message.content)">{{ message.content }}</p><div v-if="message.roll" class="dice-result"><span>ROLAGEM · {{ message.roll.expression }}</span><template v-if="'groups' in message.roll">
             <div v-for="(group,groupIndex) in message.roll.groups" :key="groupIndex" class="dice-group-result">
               <span>{{ group.expression }}<template v-if="group.success"> · Sucesso {{ group.success.min }}–{{ group.success.max }}</template><template v-else-if="group.reduction && group.reduction!=='sucesso'"> · {{ reductions[group.reduction] }}</template></span>
               <div class="dice-values"><b v-for="(value,index) in group.rolls" :key="index">{{ value }}</b></div>
@@ -185,7 +275,7 @@ onBeforeUnmount(() => { disposed = true; abort.abort(); if (timer) clearTimeout(
               <footer v-else-if="group.total!==null"><span>RESULTADO DA ROLAGEM</span><strong>{{ group.total }}</strong></footer>
             </div>
             <footer v-if="message.roll.combine"><span>{{ reductions[message.roll.combine] }}</span><strong>{{ message.roll.total }}</strong></footer>
-          </template><template v-else><div class="dice-values"><b v-for="(value, index) in message.roll.rolls" :key="index">{{ value }}</b><span v-if="message.roll.modifier">{{ message.roll.modifier > 0 ? '+' : '' }}{{ message.roll.modifier }}</span></div><footer><span>RESULTADO</span><strong>{{ message.roll.total }}</strong></footer></template></div><p v-else>{{ message.content }}</p></article></div><div class="chat-composer"><div class="quick-dice"><button v-for="sides in [4,6,8,10,12,20]" :key="sides" :disabled="busy" @click="send(`/roll 1d${sides}`)">d{{ sides }}</button></div><form @submit.prevent="send()"><label class="sr-only" for="table-message">Mensagem ou comando de dados</label><textarea id="table-message" v-model="draft" rows="3" maxlength="2000" placeholder="Sua mensagem ou /roll 2d6+3" @keydown.enter.exact.prevent="send()"></textarea><div><span>Como <strong>{{ state.user.name }}</strong></span><button class="primary" :disabled="busy || !draft.trim()">Enviar ↗</button></div></form><small>Enter envia · Shift + Enter quebra linha</small></div></template>
+          </template><template v-else><div class="dice-values"><b v-for="(value, index) in message.roll.rolls" :key="index">{{ value }}</b><span v-if="message.roll.modifier">{{ message.roll.modifier > 0 ? '+' : '' }}{{ message.roll.modifier }}</span></div><footer><span>RESULTADO</span><strong>{{ message.roll.total }}</strong></footer></template></div></article></div><div class="chat-composer"><div class="quick-dice"><button v-for="sides in [4,6,8,10,12,20]" :key="sides" :disabled="busy" @click="send(`/roll 1d${sides}`)">d{{ sides }}</button></div><form @submit.prevent="send()"><label class="sr-only" for="table-message">Mensagem ou comando de dados</label><textarea id="table-message" v-model="draft" rows="3" maxlength="2000" placeholder="Sua mensagem ou /roll 2d6+3" @keydown.enter.exact.prevent="send()"></textarea><div><span>Como <strong>{{ state.user.name }}</strong></span><button class="primary" :disabled="busy || !draft.trim()">Enviar ↗</button></div></form><small>Enter envia · Shift + Enter quebra linha</small></div></template>
           <CharactersPanel v-else-if="panel === 'characters'" :characters="state.characters" :folders="state.character_folders" :user-id="state.user.id"
             v-model:compact="compactCharacters" :create-folder="createCharacterFolder" :remove-folder="removeCharacterFolder" :move-folder="moveCharacterFolder" :tokens="state.tokens" :members="state.members" :master="master" :busy="busy" :selected="selected" @view="viewCard" @create="openCharacter()" @edit="openCharacter" @place="placeCharacter" @select="selectCharacterToken" @remove="removeToken" @layer="setTokenLayer" />
           <section v-else-if="panel === 'members'" class="panel-content"><div class="panel-heading"><h2>Grupo da campanha</h2><span>{{ state.members.length }} PARTICIPANTES</span></div><p class="panel-help">Pessoas com acesso à mesa. Para convidar mais jogadores, use a opção de convite na dashboard.</p><ul class="member-list"><li v-for="member in state.members" :key="member.id"><span>{{ member.name.slice(0, 1).toUpperCase() }}</span><div><strong>{{ member.name }}{{ member.id === state.user.id ? ' (você)' : '' }}</strong><small>{{ member.role === 'mestre' ? 'Mestre da mesa' : 'Jogador' }}</small></div></li></ul></section>

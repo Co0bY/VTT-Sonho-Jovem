@@ -133,3 +133,7 @@ A aba Ficha permite salvar modelos privados ou globais e copiar os modelos dispo
 ## Atualização — técnicas de Shounen’s Dream
 
 O modelo oficial tem seletores de elemento, nível e atributo, custo calculado e rolagens de ataque e dano com a descrição publicada no chat. Consulte `37-tecnicas-shounens-dream.md` para regras e uso.
+
+## Atualização — dados 3D, som e paginação do chat
+
+A entrega foi retomada na branch `feat/dados-3d-e-som`, a partir do commit `b7bd6cc`, e está em revisão no [PR #8](https://github.com/Co0bY/VTT-Sonho-Jovem/pull/8). O chat abre com até 50 mensagens recentes, no fim da lista. Subir ao topo carrega páginas anteriores de até 50 mensagens, mantendo a posição de leitura. Novas rolagens acionam o Canvas e o som conforme a preferência do navegador. Consulte `38-dados-3d-e-som.md` para uso, decisões e validações.
