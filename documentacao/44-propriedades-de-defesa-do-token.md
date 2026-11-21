@@ -12,3 +12,4 @@ O backend valida os valores e a permissão de edição no cenário ativo. O Post
 ## Validação
 
 Build, tipagem e integração da API passaram. A integração conferiu permissões, visibilidade, rejeição de frações, gravação de zero e limpeza de um dos campos.
+Os 28 testes unitários e a suíte da mesa no Chromium passaram. A suíte abriu o painel por clique direito, salvou os números e confirmou que eles reapareceram ao reabrir. Também verificou que cancelar descarta alterações e que o arraste com o botão direito não abre o painel.
